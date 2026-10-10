@@ -34,9 +34,18 @@ export async function fetchCard(url: string, opts: { downloadFiles?: boolean } =
   return card;
 }
 
-/** Enrich tenders that don't yet have card details. */
-export async function enrichCards(limit: number, opts: { downloadFiles?: boolean } = {}): Promise<number> {
-  const rows: TenderRow[] = getTendersWithoutCard(limit);
+/**
+ * Enrich tenders that don't yet have card details. `only` narrows the
+ * candidates (e.g. to criteria matches, so a full-market feed doesn't spend
+ * the per-cycle budget on irrelevant cards).
+ */
+export async function enrichCards(
+  limit: number,
+  opts: { downloadFiles?: boolean; only?: (t: TenderRow) => boolean } = {},
+): Promise<number> {
+  const rows: TenderRow[] = opts.only
+    ? getTendersWithoutCard(100_000).filter(opts.only).slice(0, limit)
+    : getTendersWithoutCard(limit);
   logger.info(`Enriching ${rows.length} tenders without card data`);
   let ok = 0;
   for (const row of rows) {

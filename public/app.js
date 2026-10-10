@@ -382,6 +382,7 @@ function setButtonsDisabled(v) {
 $("#s-run").addEventListener("click", async () => {
   const body = {
     keywords: $("#s-keywords").value,
+    feed: $("#s-feed").checked,
     status: $("#s-status").value,
     trade: $("#s-trade").value,
     dateFrom: $("#s-dateFrom").value.trim() || undefined,

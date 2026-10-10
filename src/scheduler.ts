@@ -4,7 +4,7 @@ import { getAllTenders, markMatchNotified } from "./db/db.js";
 import { logger } from "./logger.js";
 import { enrichCards } from "./scraper/cardScraper.js";
 import { indexPendingDocs } from "./scraper/docs.js";
-import { scrapeQueries } from "./scraper/marketScraper.js";
+import { scrapeFeed, scrapeQueries, type ScrapeSummary } from "./scraper/marketScraper.js";
 import { getSettings } from "./settings.js";
 import type { SearchQuery } from "./types.js";
 
@@ -67,21 +67,30 @@ export async function runCycle(): Promise<CycleResult> {
   const criteria = loadCriteriaSafe();
   slog(`Цикл старт. Cookie: ${settings.authCookie ? "задана" : "нет (гость)"}`);
 
-  // 1. Collect the list for each keyword.
-  const keywords = criteria.keywordsAny.length ? criteria.keywordsAny : [];
-  const queries: SearchQuery[] = keywords.length
-    ? keywords.map((k) => ({ status: "actual", trade: "buy", keyword: k }))
-    : [{ status: "actual", trade: "buy" }];
-  const scrapeSummary = await scrapeQueries(queries);
+  // 1. Collect the list: the whole newest-first feed when the search session is
+  //    authenticated, otherwise (guest, 20 rows per query) one query per keyword.
+  let scrapeSummary: ScrapeSummary = await scrapeFeed({ status: "actual", trade: "buy" });
+  if (scrapeSummary.mode === "guest") {
+    slog("Поиск в гостевом режиме — сбор по ключевым словам (20 результатов на запрос)");
+    const keywords = criteria.keywordsAny.length ? criteria.keywordsAny : [];
+    const queries: SearchQuery[] = keywords.length
+      ? keywords.map((k) => ({ status: "actual", trade: "buy", keyword: k }))
+      : [{ status: "actual", trade: "buy" }];
+    scrapeSummary = await scrapeQueries(queries);
+  }
   slog(`Сбор: новых ${scrapeSummary.inserted}, обновлено ${scrapeSummary.updated}, режим сайта: ${scrapeSummary.mode ?? "?"}`);
-  if (queries.length && scrapeSummary.fetched === 0) {
+  if (scrapeSummary.fetched === 0) {
     slog(`ВНИМАНИЕ: сбор не вернул ни одной записи — возможно, изменился API B2B-Center`);
   }
 
   // 2. Enrich cards (+ documentation) for tenders missing details.
   let enriched = 0;
   if (settings.autoEnrich) {
-    enriched = await enrichCards(settings.enrichPerCycle, { downloadFiles: settings.autoDownloadDocs });
+    // Only criteria matches get a card: the feed brings ~1000 tenders a day.
+    enriched = await enrichCards(settings.enrichPerCycle, {
+      downloadFiles: settings.autoDownloadDocs,
+      only: (t) => evaluate(t, criteria).matched,
+    });
     slog(`Карточек обработано: ${enriched}`);
   }
 

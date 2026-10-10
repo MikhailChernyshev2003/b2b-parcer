@@ -19,7 +19,7 @@ import { logger } from "../logger.js";
 import { getAuthStatus, refreshAuthStatus } from "../authStatus.js";
 import { enrichCards, fetchCard } from "../scraper/cardScraper.js";
 import { indexPendingDocs } from "../scraper/docs.js";
-import { scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
+import { scrapeFeed, scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
 import { assembleCookie, getSettings, hasAuth, parseCookieDump, settingsView, updateSettings } from "../settings.js";
 import { getSchedulerState, runCycle, startScheduler, stopScheduler } from "../scheduler.js";
 import { getForm, saveForm, type AppField } from "../application/form.js";
@@ -114,6 +114,11 @@ export function createServer(): express.Express {
         : [];
     const dateFrom = typeof body.dateFrom === "string" ? body.dateFrom : undefined;
     const dateTo = typeof body.dateTo === "string" ? body.dateTo : undefined;
+
+    if (body.feed === true) {
+      const job = startJob("scrape", () => scrapeFeed({ status, trade }));
+      return res.json({ started: true, job });
+    }
 
     const finalKeywords = keywords.length ? keywords : loadCriteriaSafe().keywordsAny;
     const base: SearchQuery = { status, trade };
