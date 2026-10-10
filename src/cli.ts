@@ -8,6 +8,7 @@ import { scrapeFeed, scrapeQueries, sliceByDay } from "./scraper/marketScraper.j
 import type { MarketStatus, SearchQuery } from "./types.js";
 import { hasAuth } from "./settings.js";
 import { describeAuth, refreshAuthStatus } from "./authStatus.js";
+import { loginViaBrowser } from "./auth/browserLogin.js";
 import { startServer } from "./server/server.js";
 import { indexPendingDocs } from "./scraper/docs.js";
 import { runCycle, startScheduler } from "./scheduler.js";
@@ -154,7 +155,11 @@ b2b-parcer — парсер тендеров B2B-Center (сторона пост
       Оценка тендеров по критериям, печать топа и выгрузка data/report.{json,csv}.
 
   npm run stats
-      Счётчики базы.
+      Счётчики базы и проверка авторизации.
+
+  tsx src/index.ts login
+      Открыть окно Chrome со страницей входа B2B-Center; после входа cookie
+      сохраняется автоматически (data/settings.json, профиль data/browser-profile).
 
   npm run serve -- [--port 5173]
       Веб-интерфейс: фильтры, критерии, список тендеров, карточки, запуск сбора.
@@ -190,6 +195,11 @@ export async function run(argv: string[]): Promise<void> {
     case "stats":
       await cmdStats();
       break;
+    case "login": {
+      const { userId } = await loginViaBrowser();
+      console.log(`\nВход выполнен (user_id ${userId}). Авторизация: ${describeAuth(await refreshAuthStatus())}\n`);
+      break;
+    }
     case "serve":
       startServer(typeof args.flags.port === "string" ? Number(args.flags.port) : undefined);
       break;

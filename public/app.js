@@ -510,6 +510,24 @@ $("#set-check").addEventListener("click", async () => {
   }
 });
 
+$("#login-browser").addEventListener("click", async () => {
+  $("#login-status").style.color = "";
+  $("#login-status").textContent = "Открываю окно браузера… Войдите в личный кабинет B2B-Center.";
+  try {
+    await api("/api/login/browser", { method: "POST" });
+    pollJob(async () => {
+      const job = await api("/api/job");
+      const ok = job.status === "done";
+      $("#login-status").textContent = ok ? `Вход выполнен (user_id ${job.result.userId}) ✓` : `Не удалось: ${job.error}`;
+      $("#login-status").style.color = ok ? "var(--good)" : "#99312a";
+      loadSettings();
+      loadStats();
+    });
+  } catch (e) {
+    $("#login-status").textContent = "Ошибка: " + e.message;
+  }
+});
+
 /* ---------- Scheduler ---------- */
 let schedPoll = null;
 let lastSchedCycles = null;

@@ -183,7 +183,20 @@
         <div class="panel">
           <h2>Авторизация</h2>
           <p class="hint">
-            Самый простой способ: войдите на сайт в браузере → DevTools (F12) → вкладка
+            Нажмите кнопку — откроется окно Chrome со страницей входа B2B-Center. Войдите как обычно
+            (логин и пароль или электронная подпись) и отметьте «Запомнить меня». Окно закроется само,
+            cookie сохранится автоматически. Пароль парсер не видит. Когда сессия истечёт, парсер
+            попробует восстановить её сам; если не выйдет — просто войдите ещё раз.
+          </p>
+          <div class="actions">
+            <button id="login-browser" class="btn primary">Войти через браузер</button>
+            <span id="login-status"></span>
+          </div>
+
+          <details>
+          <summary class="muted">Ввести cookie вручную</summary>
+          <p class="hint">
+            Войдите на сайт в браузере → DevTools (F12) → вкладка
             <b>Application</b> (Приложение) → <b>Cookies</b> → <code>https://www.b2b-center.ru</code>
             → выделите все строки (Cmd/Ctrl+A) и скопируйте → вставьте сюда. Лишние куки (Яндекс,
             аналитика) и кавычки уберутся автоматически — останутся только куки B2B-Center.
@@ -205,6 +218,7 @@
             <button id="set-check" class="btn">Проверить авторизацию</button>
             <span id="set-check-status"></span>
           </div>
+          </details>
 
           <hr />
           <h2>Планировщик</h2>

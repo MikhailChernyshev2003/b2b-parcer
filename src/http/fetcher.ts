@@ -191,11 +191,21 @@ class Fetcher {
    *    own OpenID "silent-auth" flow; /api/v1/config reports user.id = 0 for guests.
    */
   async checkAuth(): Promise<{ authenticated: boolean; userId: string | null; searchAuthenticated: boolean }> {
-    const html = await this.getText(`${config.baseUrl}/market/view.html?id=1`, { allowStatus: [404] });
-    const m = html.match(/"user_id"\s*:\s*(\d+|null|"\d+")/);
-    const userId = m && m[1] !== "null" && m[1] !== "0" ? m[1]!.replace(/"/g, "") : null;
+    const html = await this.getText(CLASSIC_PROBE_URL, { allowStatus: [404] });
+    const userId = userIdFromHtml(html);
     const cfg = await this.getJson<{ user?: { id?: number } }>(`${config.baseUrl}/api/v1/config/?fields=user`);
     return { authenticated: Boolean(userId), userId, searchAuthenticated: Number(cfg.user?.id) > 0 };
+  }
+
+  /**
+   * user_id that the site sees for an arbitrary Cookie header (not the saved
+   * one) — used to detect the moment a browser login succeeds. Bypasses the
+   * cookie jar so a candidate cookie can't leak into regular requests.
+   */
+  async userIdForCookie(cookie: string): Promise<string | null> {
+    await this.throttle();
+    const res = await this.client.get(CLASSIC_PROBE_URL, { headers: { Cookie: cookie }, responseType: "text" });
+    return userIdFromHtml(String(res.data ?? ""));
   }
 
   private async request(
@@ -235,6 +245,14 @@ class Fetcher {
     }
     throw new Error(`GET ${url} failed after ${config.maxRetries} attempts: ${(lastErr as Error)?.message}`);
   }
+}
+
+const CLASSIC_PROBE_URL = `${config.baseUrl}/market/view.html?id=1`;
+
+/** GlobalJsConfig.user_id of a classic page; null for guests. */
+function userIdFromHtml(html: string): string | null {
+  const m = html.match(/"user_id"\s*:\s*(\d+|null|"\d+")/);
+  return m && m[1] !== "null" && m[1] !== "0" ? m[1]!.replace(/"/g, "") : null;
 }
 
 function parseJsonBody<T>(url: string, body: string): T {

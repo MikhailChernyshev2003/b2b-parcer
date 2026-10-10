@@ -6,6 +6,7 @@ import { enrichCards } from "./scraper/cardScraper.js";
 import { indexPendingDocs } from "./scraper/docs.js";
 import { scrapeFeed, scrapeQueries, type ScrapeSummary } from "./scraper/marketScraper.js";
 import { getSettings } from "./settings.js";
+import { describeAuth, ensureSession } from "./authStatus.js";
 import type { SearchQuery } from "./types.js";
 
 export interface CycleResult {
@@ -65,7 +66,7 @@ export async function runCycle(): Promise<CycleResult> {
   state.running = true;
   const settings = getSettings();
   const criteria = loadCriteriaSafe();
-  slog(`Цикл старт. Cookie: ${settings.authCookie ? "задана" : "нет (гость)"}`);
+  slog(`Цикл старт. Авторизация: ${describeAuth(await ensureSession())}`);
 
   // 1. Collect the list: the whole newest-first feed when the search session is
   //    authenticated, otherwise (guest, 20 rows per query) one query per keyword.

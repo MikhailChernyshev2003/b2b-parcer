@@ -17,6 +17,7 @@ import {
 import { evaluate } from "../criteria/matcher.js";
 import { logger } from "../logger.js";
 import { getAuthStatus, refreshAuthStatus } from "../authStatus.js";
+import { loginViaBrowser } from "../auth/browserLogin.js";
 import { enrichCards, fetchCard } from "../scraper/cardScraper.js";
 import { indexPendingDocs } from "../scraper/docs.js";
 import { scrapeFeed, scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
@@ -207,6 +208,16 @@ export function createServer(): express.Express {
     updateSettings(patch);
     if (cookieChanged) void refreshAuthStatus();
     res.json(settingsView());
+  });
+
+  app.post("/api/login/browser", (_req, res) => {
+    if (isRunning()) return res.status(409).json({ error: "Задача уже выполняется" });
+    const job = startJob("login", async () => {
+      const r = await loginViaBrowser();
+      await refreshAuthStatus();
+      return r;
+    });
+    res.json({ started: true, job });
   });
 
   app.post("/api/settings/parse-cookies", (req, res) => {
