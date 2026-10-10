@@ -16,7 +16,7 @@ import {
 } from "../criteria/criteria.js";
 import { evaluate } from "../criteria/matcher.js";
 import { logger } from "../logger.js";
-import { fetcher } from "../http/fetcher.js";
+import { getAuthStatus, refreshAuthStatus } from "../authStatus.js";
 import { enrichCards, fetchCard } from "../scraper/cardScraper.js";
 import { indexPendingDocs } from "../scraper/docs.js";
 import { scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
@@ -48,7 +48,7 @@ export function createServer(): express.Express {
   app.use("/files", express.static(FILES_DIR));
 
   app.get("/api/stats", (_req, res) => {
-    res.json({ ...countTenders(), authenticated: hasAuth() });
+    res.json({ ...countTenders(), auth: getAuthStatus() });
   });
 
   app.get("/api/tenders", (req, res) => {
@@ -194,11 +194,13 @@ export function createServer(): express.Express {
     const patch: Record<string, unknown> = {};
     if (Array.isArray(body.authCookiePairs)) patch.authCookie = assembleCookie(body.authCookiePairs);
     else if (typeof body.authCookie === "string") patch.authCookie = body.authCookie.trim();
+    const cookieChanged = patch.authCookie != null && patch.authCookie !== getSettings().authCookie;
     if (body.pollIntervalMinutes != null) patch.pollIntervalMinutes = Number(body.pollIntervalMinutes);
     if (body.enrichPerCycle != null) patch.enrichPerCycle = Number(body.enrichPerCycle);
     if (typeof body.autoEnrich === "boolean") patch.autoEnrich = body.autoEnrich;
     if (typeof body.autoDownloadDocs === "boolean") patch.autoDownloadDocs = body.autoDownloadDocs;
     updateSettings(patch);
+    if (cookieChanged) void refreshAuthStatus();
     res.json(settingsView());
   });
 
@@ -208,16 +210,15 @@ export function createServer(): express.Express {
   });
 
   app.post("/api/settings/check-auth", async (_req, res) => {
-    if (!hasAuth()) return res.json({ authenticated: false, userId: null, note: "Cookie не задан" });
-    try {
-      const r = await fetcher.checkAuth();
-      const note = r.authenticated
-        ? ""
-        : "Сессия не распознана. Чаще всего не хватает дополнительных кук помимо PHPSESSID — добавьте остальные куки b2b-center.ru из DevTools (Application → Cookies), особенно те, что появляются после входа.";
-      res.json({ ...r, note });
-    } catch (err) {
-      res.status(502).json({ error: (err as Error).message });
-    }
+    if (!hasAuth()) return res.json({ ...getAuthStatus(), note: "Cookie не задан" });
+    const r = await refreshAuthStatus();
+    if (r.error) return res.status(502).json({ error: r.error });
+    const note = !r.authenticated
+      ? "Сессия не распознана. Чаще всего она просрочена или не хватает дополнительных кук помимо PHPSESSID — добавьте остальные куки b2b-center.ru из DevTools (Application → Cookies), особенно те, что появляются после входа."
+      : !r.searchAuthenticated
+        ? "Новый поиск B2B-Center авторизуется отдельно (OpenID), поэтому список собирается как гость: 20 результатов на запрос, без страниц и фильтра по датам. Карточки и документация используют вашу сессию."
+        : "";
+    res.json({ ...r, note });
   });
 
   // --- Планировщик ---
@@ -250,4 +251,5 @@ export function startServer(port = Number(process.env.PORT) || 5173): void {
   app.listen(port, () => {
     logger.info(`Веб-интерфейс запущен: http://localhost:${port}`);
   });
+  if (hasAuth()) void refreshAuthStatus();
 }

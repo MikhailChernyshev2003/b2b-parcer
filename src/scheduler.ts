@@ -65,7 +65,7 @@ export async function runCycle(): Promise<CycleResult> {
   state.running = true;
   const settings = getSettings();
   const criteria = loadCriteriaSafe();
-  slog(`Цикл старт. Авторизация: ${settings.authCookie ? "да" : "нет (гость)"}`);
+  slog(`Цикл старт. Cookie: ${settings.authCookie ? "задана" : "нет (гость)"}`);
 
   // 1. Collect the list for each keyword.
   const keywords = criteria.keywordsAny.length ? criteria.keywordsAny : [];

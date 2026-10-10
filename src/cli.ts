@@ -7,6 +7,7 @@ import { enrichCards, fetchCard } from "./scraper/cardScraper.js";
 import { scrapeQueries, sliceByDay } from "./scraper/marketScraper.js";
 import type { MarketStatus, SearchQuery } from "./types.js";
 import { hasAuth } from "./settings.js";
+import { describeAuth, refreshAuthStatus } from "./authStatus.js";
 import { startServer } from "./server/server.js";
 import { indexPendingDocs } from "./scraper/docs.js";
 import { runCycle, startScheduler } from "./scheduler.js";
@@ -82,12 +83,12 @@ async function cmdScrape(args: Args): Promise<void> {
     queries = queries.flatMap((q) => sliceByDay(q, from, to));
   }
 
-  logger.info(`Запуск парсинга: запросов=${queries.length}, статус=${status}, авторизация=${hasAuth() ? "да" : "нет (гость)"}`);
+  logger.info(`Запуск парсинга: запросов=${queries.length}, статус=${status}, cookie=${hasAuth() ? "задана" : "нет"}`);
   const summary = await scrapeQueries(queries, {
     maxPages: typeof args.flags.pages === "string" ? Number(args.flags.pages) : undefined,
   });
   logger.info(
-    `Готово. Получено строк: ${summary.fetched}, уникальных id: ${summary.uniqueIds}, новых: ${summary.inserted}, обновлено: ${summary.updated}`,
+    `Готово. Получено строк: ${summary.fetched}, уникальных id: ${summary.uniqueIds}, новых: ${summary.inserted}, обновлено: ${summary.updated}, режим сайта: ${summary.mode ?? "?"}`,
   );
 }
 
@@ -111,11 +112,12 @@ function cmdReport(args: Args): void {
   console.log(`Отчёт сохранён: ${paths.json}\n            и: ${paths.csv}\n`);
 }
 
-function cmdStats(): void {
+async function cmdStats(): Promise<void> {
   const { total, withCard } = countTenders();
+  const auth = await refreshAuthStatus();
   console.log(`\nВсего тендеров в базе: ${total}`);
   console.log(`С загруженной карточкой: ${withCard}`);
-  console.log(`БД: ${hasAuth() ? "(сессия авторизована)" : "(гостевая сессия)"}\n`);
+  console.log(`Авторизация: ${describeAuth(auth)}\n`);
 }
 
 function printHelp(): void {
@@ -174,7 +176,7 @@ export async function run(argv: string[]): Promise<void> {
       cmdReport(args);
       break;
     case "stats":
-      cmdStats();
+      await cmdStats();
       break;
     case "serve":
       startServer(typeof args.flags.port === "string" ? Number(args.flags.port) : undefined);

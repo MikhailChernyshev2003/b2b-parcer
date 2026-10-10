@@ -62,8 +62,8 @@ class Fetcher {
     this.lastRequestAt = Date.now();
   }
 
-  async getText(url: string): Promise<string> {
-    return (await this.request(url, "text")).data as string;
+  async getText(url: string, opts: { allowStatus?: number[] } = {}): Promise<string> {
+    return (await this.request(url, "text", opts)).data as string;
   }
 
   /** GET a JSON endpoint. Throws if the body is not JSON (e.g. an HTML error/captcha page). */
@@ -91,23 +91,27 @@ class Fetcher {
   }
 
   /**
-   * Verify whether the current cookie authenticates a real user.
-   * Uses /market/ rather than the home page: the latter is behind an anti-bot
-   * captcha for non-browser clients, while /market/ renders the real (and,
-   * when authorized, logged-in) page with GlobalJsConfig.user_id and a "logout" link.
+   * Verify whether the current cookie authenticates a real user. The site now
+   * has two halves with separate sessions:
+   *  - classic pages (/market/view.html, classic tender cards, documentation)
+   *    accept the old session cookie and render GlobalJsConfig.user_id. Any
+   *    view.html page works, even a 404 one, and it is not captcha-protected
+   *    (unlike the home page and most other sections);
+   *  - the new app (market search API, market-next cards) logs in through its
+   *    own OpenID "silent-auth" flow; /api/v1/config reports user.id = 0 for guests.
    */
-  async checkAuth(): Promise<{ authenticated: boolean; userId: string | null }> {
-    const html = await this.getText(`${config.baseUrl}/market/`);
+  async checkAuth(): Promise<{ authenticated: boolean; userId: string | null; searchAuthenticated: boolean }> {
+    const html = await this.getText(`${config.baseUrl}/market/view.html?id=1`, { allowStatus: [404] });
     const m = html.match(/"user_id"\s*:\s*(\d+|null|"\d+")/);
-    const userId = m && m[1] !== "null" ? m[1]!.replace(/"/g, "") : null;
-    const hasLoggedInMarkers = /logout|Личный кабинет/.test(html);
-    return { authenticated: Boolean(userId) || hasLoggedInMarkers, userId };
+    const userId = m && m[1] !== "null" && m[1] !== "0" ? m[1]!.replace(/"/g, "") : null;
+    const cfg = await this.getJson<{ user?: { id?: number } }>(`${config.baseUrl}/api/v1/config/?fields=user`);
+    return { authenticated: Boolean(userId), userId, searchAuthenticated: Number(cfg.user?.id) > 0 };
   }
 
   private async request(
     url: string,
     responseType: "text" | "arraybuffer",
-    opts: { method?: "GET" | "POST"; data?: string; headers?: Record<string, string> } = {},
+    opts: { method?: "GET" | "POST"; data?: string; headers?: Record<string, string>; allowStatus?: number[] } = {},
   ): Promise<AxiosResponse> {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
@@ -126,7 +130,9 @@ class Fetcher {
         });
         this.mergeSetCookie(res.headers["set-cookie"] as string[] | undefined);
         if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
-        if (res.status >= 400) logger.warn(`GET ${url} -> HTTP ${res.status}`);
+        if (res.status >= 400 && !opts.allowStatus?.includes(res.status)) {
+          logger.warn(`${opts.method ?? "GET"} ${url} -> HTTP ${res.status}`);
+        }
         return res;
       } catch (err) {
         lastErr = err;

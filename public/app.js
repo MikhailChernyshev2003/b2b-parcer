@@ -58,10 +58,21 @@ $$(".tab").forEach((tab) => {
 async function loadStats() {
   try {
     const s = await api("/api/stats");
-    $("#stats").textContent = `Тендеров: ${s.total} · с карточкой: ${s.withCard} · ${s.authenticated ? "авторизован" : "гость"}`;
+    $("#stats").textContent = `Тендеров: ${s.total} · с карточкой: ${s.withCard} · ${authLabel(s.auth)}`;
+    $("#stats").title = s.auth && s.auth.error ? s.auth.error : "";
+    // The server checks the cookie in the background after start / save.
+    if (s.auth && s.auth.cookieSet && s.auth.authenticated == null && !s.auth.error) setTimeout(loadStats, 2000);
   } catch (e) {
     $("#stats").textContent = "—";
   }
+}
+
+function authLabel(a) {
+  if (!a || !a.cookieSet) return "гость";
+  if (a.error) return "авторизация: ошибка проверки";
+  if (a.authenticated == null) return "проверка cookie…";
+  if (!a.authenticated) return "cookie недействительна";
+  return a.searchAuthenticated ? "авторизован" : "авторизован (поиск — гость)";
 }
 
 /* ---------- Tenders list ---------- */
@@ -485,7 +496,7 @@ $("#set-check").addEventListener("click", async () => {
     loadStats();
     const r = await api("/api/settings/check-auth", { method: "POST" });
     $("#set-check-status").textContent = r.authenticated
-      ? `Авторизован (user_id ${r.userId}) ✓`
+      ? `Авторизован (user_id ${r.userId}) ✓${r.note ? " " + r.note : ""}`
       : `Не авторизован${r.note ? " — " + r.note : ""}`;
     $("#set-check-status").style.color = r.authenticated ? "var(--good)" : "#99312a";
   } catch (e) {
