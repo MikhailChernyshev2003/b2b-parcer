@@ -10,6 +10,9 @@
  * Stems are compared fuzzily (prefix, min 4 chars, length diff <= 2) because
  * the Snowball stemmer can yield different bases for forms of the same word
  * (e.g. "система" -> "систем", but "систем" -> "сист").
+ *
+ * Very short stems (< 3 chars) are not compared at all, only the raw tokens:
+ * "ИИ" stems to "и" and would otherwise match the conjunction "и" everywhere.
  */
 
 const VOWELS = "аеиоуыэюя";
@@ -81,20 +84,30 @@ export function stemRu(word: string): string {
   return head + rv;
 }
 
+/** Split text into lowercase raw tokens. */
+function tokenize(text: string): string[] {
+  return text.toLowerCase().match(/[a-zа-яё0-9][a-zа-яё0-9]*/g) ?? [];
+}
+
+function stemToken(t: string): string {
+  return /[а-яё]/.test(t) ? stemRu(t) : t;
+}
+
 /** Split text into lowercase tokens; stem Cyrillic tokens. */
 export function tokenizeStems(text: string): string[] {
-  const raw = text.toLowerCase().match(/[a-zа-яё0-9][a-zа-яё0-9]*/g) ?? [];
-  return raw.map((t) => (/[а-яё]/.test(t) ? stemRu(t) : t));
+  return tokenize(text).map(stemToken);
 }
 
 export interface PreparedText {
   raw: string; // lowercased original (for substring fallback)
-  stems: string[]; // stemmed tokens
+  tokens: string[]; // raw lowercase tokens (for short-word exact matching)
+  stems: string[]; // stemmed tokens, aligned with `tokens`
 }
 
 export function prepareText(text: string): PreparedText {
   const raw = text.toLowerCase();
-  return { raw, stems: tokenizeStems(raw) };
+  const tokens = tokenize(raw);
+  return { raw, tokens, stems: tokens.map(stemToken) };
 }
 
 /**
@@ -102,7 +115,7 @@ export function prepareText(text: string): PreparedText {
  * produce different bases for forms of the same word: "систем" vs "сист").
  */
 function stemEq(a: string, b: string): boolean {
-  if (a === b) return true;
+  if (a === b) return a.length >= 3;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.length >= 4 && long.length - short.length <= 2 && long.startsWith(short);
 }
@@ -114,12 +127,13 @@ export function phraseMatches(prep: PreparedText, needle: string): boolean {
   // Substring fallback for long-enough needles keeps partial roots working
   // ("электродвигател"); short needles would false-match inside other words.
   if (n.length >= 5 && prep.raw.includes(n)) return true;
-  const nStems = tokenizeStems(n);
-  if (!nStems.length) return false;
-  const T = prep.stems;
-  outer: for (let i = 0; i <= T.length - nStems.length; i++) {
-    for (let j = 0; j < nStems.length; j++) {
-      if (!stemEq(T[i + j]!, nStems[j]!)) continue outer;
+  const nTokens = tokenize(n);
+  if (!nTokens.length) return false;
+  const nStems = nTokens.map(stemToken);
+  const { tokens: T, stems: S } = prep;
+  outer: for (let i = 0; i <= T.length - nTokens.length; i++) {
+    for (let j = 0; j < nTokens.length; j++) {
+      if (T[i + j] !== nTokens[j] && !stemEq(S[i + j]!, nStems[j]!)) continue outer;
     }
     return true;
   }
