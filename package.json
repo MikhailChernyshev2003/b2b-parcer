@@ -3,16 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.16.0 <21 || >=22.3.0"
+  },
   "bin": {
     "b2b": "src/index.ts"
   },
   "scripts": {
+    "start": "tsx src/index.ts serve",
+    "login": "tsx src/index.ts login",
     "scrape": "tsx src/index.ts scrape",
     "card": "tsx src/index.ts card",
+    "index-docs": "tsx src/index.ts index-docs",
     "report": "tsx src/index.ts report",
     "stats": "tsx src/index.ts stats",
+    "watch": "tsx src/index.ts watch",
     "serve": "tsx src/index.ts serve",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts serve",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
   },
