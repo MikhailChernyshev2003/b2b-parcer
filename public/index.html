@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>B2B-Center — Парсер тендеров</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">B2B</span>
+        <span>Парсер тендеров</span>
+      </div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="tenders">Тендеры</button>
+        <button class="tab" data-tab="criteria">Критерии</button>
+        <button class="tab" data-tab="scrape">Сбор</button>
+        <button class="tab" data-tab="settings">Настройки</button>
+      </nav>
+      <div class="stats" id="stats">—</div>
+    </header>
+
+    <main>
+      <!-- ТЕНДЕРЫ -->
+      <section class="view active" id="view-tenders">
+        <div class="filters">
+          <input type="search" id="f-q" placeholder="Поиск по названию, организатору, категории…" />
+          <select id="f-status">
+            <option value="all">Все статусы</option>
+            <option value="actual" selected>Актуальные</option>
+            <option value="archive">Архив</option>
+          </select>
+          <select id="f-sort">
+            <option value="published">Сначала новые</option>
+            <option value="end">По дате окончания</option>
+          </select>
+          <label class="chk"><input type="checkbox" id="f-matched" checked /> только подходящие</label>
+          <label class="chk"><input type="checkbox" id="f-card" /> только с карточкой</label>
+          <button id="f-refresh" class="btn">Обновить</button>
+        </div>
+
+        <div class="split">
+          <div class="list-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Score</th>
+                  <th>Тип</th>
+                  <th>Название</th>
+                  <th>Организатор</th>
+                  <th>Регион</th>
+                  <th>Цена</th>
+                  <th>Окончание</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+            <div id="empty" class="empty hidden">Ничего не найдено. Запустите «Сбор».</div>
+          </div>
+
+          <aside class="detail" id="detail">
+            <div class="detail-empty">Выберите тендер слева, чтобы увидеть подробности.</div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- КРИТЕРИИ -->
+      <section class="view" id="view-criteria">
+        <div class="panel">
+          <h2>Критерии отбора</h2>
+          <p class="hint">Списки — по одному значению в строке. Поиск морфологический: «разработка сайта» найдёт «разработке сайтов», фразы ищутся как соседние слова — пишите слова в начальной форме. Изменения сохраняются в <code>config/criteria.yaml</code>.</p>
+          <div class="form-grid">
+            <label>Ключевые слова (любое) — также используются как запросы при сборе
+              <textarea id="c-keywordsAny" rows="4"></textarea>
+            </label>
+            <label>Обязательные слова (все)
+              <textarea id="c-keywordsAll" rows="4"></textarea>
+            </label>
+            <label>Стоп-слова (исключить)
+              <textarea id="c-exclude" rows="4"></textarea>
+            </label>
+            <label>Категории (любая)
+              <textarea id="c-categoriesAny" rows="4"></textarea>
+            </label>
+            <label>Регионы (любой)
+              <textarea id="c-regionsAny" rows="4"></textarea>
+            </label>
+            <label>Типы процедур (любой)
+              <textarea id="c-procedureTypesAny" rows="4"></textarea>
+            </label>
+            <label>Исключить организаторов
+              <textarea id="c-organizersExclude" rows="4"></textarea>
+            </label>
+            <label>Коды ОКПД2 / ОКВЭД (префиксы, напр. 28.13)
+              <textarea id="c-classifierCodes" rows="4" placeholder="28.13&#10;46.71"></textarea>
+            </label>
+          </div>
+
+          <h3>По содержимому документации</h3>
+          <p class="hint">Анализ текста файлов тендера (PDF/DOCX). Требует авторизации (вкладка «Настройки»), иначе документы недоступны и тендер помечается как «документация не проанализирована».</p>
+          <div class="form-grid">
+            <label>В документации есть (любое)
+              <textarea id="c-docKeywordsAny" rows="3"></textarea>
+            </label>
+            <label>В документации есть (все)
+              <textarea id="c-docKeywordsAll" rows="3"></textarea>
+            </label>
+            <label>Стоп-слова в документации
+              <textarea id="c-docExclude" rows="3"></textarea>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <label>Цена от, ₽ <input type="number" id="c-priceMin" /></label>
+            <label>Цена до, ₽ <input type="number" id="c-priceMax" /></label>
+            <label>Мин. дней до окончания <input type="number" id="c-minDaysUntilEnd" /></label>
+            <label>Мин. score <input type="number" id="c-minScore" /></label>
+          </div>
+          <div class="actions">
+            <button id="c-save" class="btn primary">Сохранить критерии</button>
+            <button id="c-reload" class="btn">Сбросить изменения</button>
+            <span id="c-status" class="save-status"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- СБОР -->
+      <section class="view" id="view-scrape">
+        <div class="panel">
+          <h2>Сбор тендеров</h2>
+          <p class="hint">
+            Для гостевой сессии площадка отдаёт ~20 свежих совпадений на запрос и игнорирует страницы,
+            поэтому охват достигается списком ключевых слов и нарезкой по датам.
+          </p>
+          <label>Ключевые слова (через запятую или построчно; пусто = из критериев)
+            <textarea id="s-keywords" rows="3"></textarea>
+          </label>
+          <div class="form-row">
+            <label>Статус
+              <select id="s-status">
+                <option value="actual" selected>Актуальные</option>
+                <option value="archive">Архив</option>
+                <option value="all">Все</option>
+              </select>
+            </label>
+            <label>Направление
+              <select id="s-trade">
+                <option value="all" selected>Все</option>
+                <option value="buy">Закупки</option>
+                <option value="sell">Продажи</option>
+              </select>
+            </label>
+            <label>Дата с (дд.мм.гггг) <input type="text" id="s-dateFrom" placeholder="01.06.2026" /></label>
+            <label>Дата по (дд.мм.гггг) <input type="text" id="s-dateTo" placeholder="18.06.2026" /></label>
+          </div>
+          <div class="actions">
+            <button id="s-run" class="btn primary">Запустить сбор</button>
+          </div>
+
+          <hr />
+          <h3>Дозагрузка карточек</h3>
+          <p class="hint">Загружает детальные данные тендеров без карточки (тип, регион, цена, условия, документация).</p>
+          <div class="form-row">
+            <label>Сколько карточек <input type="number" id="e-limit" value="20" /></label>
+            <label class="chk"><input type="checkbox" id="e-files" /> скачивать файлы</label>
+          </div>
+          <div class="actions">
+            <button id="e-run" class="btn">Дозагрузить карточки</button>
+          </div>
+
+          <hr />
+          <h3>Журнал задачи</h3>
+          <div id="job-status" class="job-status">Нет активных задач</div>
+          <pre id="job-log" class="job-log"></pre>
+        </div>
+      </section>
+
+      <!-- НАСТРОЙКИ -->
+      <section class="view" id="view-settings">
+        <div class="panel">
+          <h2>Авторизация</h2>
+          <p class="hint">
+            Самый простой способ: войдите на сайт в браузере → DevTools (F12) → вкладка
+            <b>Application</b> (Приложение) → <b>Cookies</b> → <code>https://www.b2b-center.ru</code>
+            → выделите все строки (Cmd/Ctrl+A) и скопируйте → вставьте сюда. Лишние куки (Яндекс,
+            аналитика) и кавычки уберутся автоматически — останутся только куки B2B-Center.
+          </p>
+          <textarea id="set-cookie-raw" rows="5" placeholder="Вставьте сюда скопированные куки из DevTools (Application → Cookies). Поддерживается и формат таблицы, и строка вида name=value; ..."></textarea>
+          <div class="actions">
+            <button id="cookie-parse" class="btn primary">Распознать куки</button>
+          </div>
+
+          <p class="hint">Распознанные куки (можно отредактировать вручную):</p>
+          <div id="cookie-rows" class="cookie-rows"></div>
+          <div class="actions">
+            <button id="cookie-add" class="btn">+ добавить куку</button>
+          </div>
+          <p class="hint" id="set-cookie-state"></p>
+
+          <div class="actions">
+            <button id="set-save" class="btn primary">Сохранить</button>
+            <button id="set-check" class="btn">Проверить авторизацию</button>
+            <span id="set-check-status"></span>
+          </div>
+
+          <hr />
+          <h2>Планировщик</h2>
+          <p class="hint">
+            Периодически выполняет полный цикл: сбор списка по ключевым словам из критериев →
+            загрузка карточек новых тендеров → анализ документации → отбор. Новые подходящие тендеры
+            отмечаются и попадают в список (фильтр «только подходящие»).
+          </p>
+          <div class="form-row">
+            <label>Интервал, минут <input type="number" id="set-interval" value="30" /></label>
+            <label>Карточек за цикл <input type="number" id="set-enrichPerCycle" value="50" /></label>
+            <label class="chk"><input type="checkbox" id="set-autoEnrich" checked /> грузить карточки</label>
+            <label class="chk"><input type="checkbox" id="set-autoDownloadDocs" checked /> грузить и анализировать документацию</label>
+          </div>
+          <div class="actions">
+            <button id="sch-start" class="btn primary">Запустить планировщик</button>
+            <button id="sch-stop" class="btn">Остановить</button>
+            <button id="sch-run" class="btn">Прогнать цикл сейчас</button>
+          </div>
+          <div id="sch-status" class="job-status">Планировщик остановлен</div>
+          <pre id="sch-log" class="job-log"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
