@@ -31,6 +31,9 @@ import { getJob, isRunning, startJob } from "./jobs.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "..", "public");
 
+/** Max rows sent to the UI table (after ranking). */
+const LIST_LIMIT = 500;
+
 /** Attach criteria-based score/match info to a tender row for the UI. */
 function withEvaluation(rows: TenderRow[]) {
   const criteria = loadCriteriaSafe();
@@ -60,10 +63,12 @@ export function createServer(): express.Express {
       req.query.hasCard === "true" ? true : req.query.hasCard === "false" ? false : undefined;
     const onlyMatched = req.query.matched === "true";
 
-    let rows = withEvaluation(queryTenders({ q, status, sort, hasCard }));
+    // Score the whole filtered set, then cut: limiting in SQL first (by date)
+    // hid older matches once the full feed made the DB large.
+    let rows = withEvaluation(queryTenders({ q, status, sort, hasCard, limit: null }));
     if (onlyMatched) rows = rows.filter((r) => r._matched);
     rows.sort((a, b) => b._score - a._score);
-    res.json({ count: rows.length, tenders: rows });
+    res.json({ count: rows.length, tenders: rows.slice(0, LIST_LIMIT) });
   });
 
   app.get("/api/tenders/:id", (req, res) => {

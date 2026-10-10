@@ -253,7 +253,8 @@ export interface TenderQuery {
   status?: string;
   hasCard?: boolean;
   sort?: "published" | "end";
-  limit?: number;
+  /** null = no limit (the caller ranks/filters the full set itself). */
+  limit?: number | null;
   offset?: number;
 }
 
@@ -274,14 +275,14 @@ export function queryTenders(opts: TenderQuery = {}): TenderRow[] {
   if (opts.hasCard === false) where.push("card_fetched_at IS NULL");
 
   const orderCol = opts.sort === "end" ? "COALESCE(end_at, actual_until)" : "published_at";
-  const limit = Math.min(Math.max(opts.limit ?? 500, 1), 5000);
-  const offset = Math.max(opts.offset ?? 0, 0);
-
-  const sql =
+  let sql =
     `SELECT * FROM tenders` +
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
-    ` ORDER BY ${orderCol} DESC LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
+    ` ORDER BY ${orderCol} DESC`;
+  if (opts.limit !== null) {
+    sql += " LIMIT ? OFFSET ?";
+    params.push(Math.min(Math.max(opts.limit ?? 500, 1), 5000), Math.max(opts.offset ?? 0, 0));
+  }
   return getDb().prepare(sql).all(...params) as TenderRow[];
 }
 
