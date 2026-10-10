@@ -90,6 +90,55 @@ export async function scrapeQueries(
   return summary;
 }
 
+export interface FeedOptions {
+  status?: SearchQuery["status"];
+  trade?: SearchQuery["trade"];
+  /** Hard cap on pages per direction (the site has ~320 pages of actual buy trades). */
+  maxPages?: number;
+  /** Stop after this many consecutive pages without new tenders (caught up). */
+  stopAfterKnownPages?: number;
+}
+
+/**
+ * Walk the whole market newest-first, without keywords, until we reach tenders
+ * that are already in the DB. Needs an authenticated search session: for a
+ * guest the site returns only the first 20 rows, which is reported in `mode`
+ * so the caller can fall back to keyword queries.
+ */
+export async function scrapeFeed(opts: FeedOptions = {}): Promise<ScrapeSummary> {
+  const query: SearchQuery = { status: opts.status ?? "actual", trade: opts.trade ?? "buy" };
+  const maxPages = Math.max(1, opts.maxPages ?? 400);
+  const stopAfter = Math.max(1, opts.stopAfterKnownPages ?? 2);
+  const summary: ScrapeSummary = { queries: 1, fetched: 0, inserted: 0, updated: 0, uniqueIds: 0, mode: null };
+  const seen = new Set<string>();
+
+  for (const direction of directionsOf(query)) {
+    let knownPages = 0;
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await scrapeOnce(query, direction, page);
+      summary.mode = res.mode;
+      let inserted = 0;
+      for (const item of res.items) {
+        summary.fetched++;
+        seen.add(item.id);
+        if (upsertListItem(item) === "inserted") inserted++;
+        else summary.updated++;
+      }
+      summary.inserted += inserted;
+      if (res.mode === "guest" || page >= res.pageCount || !res.items.length) break;
+      knownPages = inserted ? 0 : knownPages + 1;
+      if (knownPages >= stopAfter) {
+        logger.info(`  лента: ${stopAfter} стр. подряд без новых тендеров — догнали`);
+        break;
+      }
+    }
+  }
+
+  summary.uniqueIds = seen.size;
+  if (summary.mode === "guest") logger.warn("Лента недоступна гостю: сайт отдал только первые 20 записей.");
+  return summary;
+}
+
 /**
  * Expand one query over a date range into per-day queries.
  * Date filters are honoured by the site only for an authenticated session.

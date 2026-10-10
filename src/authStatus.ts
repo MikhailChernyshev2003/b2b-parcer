@@ -1,6 +1,7 @@
 import { fetcher } from "./http/fetcher.js";
 import { logger } from "./logger.js";
 import { hasAuth } from "./settings.js";
+import { hasBrowserProfile, refreshSessionFromProfile } from "./auth/browserLogin.js";
 
 /**
  * Result of the last real check of the configured cookie against the site.
@@ -47,6 +48,23 @@ export async function refreshAuthStatus(): Promise<AuthStatus> {
     logger.warn(`Проверка авторизации не удалась: ${(err as Error).message}`);
   }
   return status;
+}
+
+/**
+ * Check the session and, if it is gone, try to restore it silently from the
+ * saved browser profile («Запомнить меня»). Used before scheduler cycles.
+ */
+export async function ensureSession(): Promise<AuthStatus> {
+  let s = await refreshAuthStatus();
+  if (!s.error && !s.authenticated && hasBrowserProfile()) {
+    const userId = await refreshSessionFromProfile().catch((err) => {
+      logger.warn(`Фоновое восстановление входа не удалось: ${(err as Error).message}`);
+      return null;
+    });
+    if (userId) s = await refreshAuthStatus();
+    else logger.warn("Сессия B2B-Center истекла — нажмите «Войти через браузер» во вкладке «Настройки».");
+  }
+  return s;
 }
 
 /** One-line human summary for logs and CLI. */

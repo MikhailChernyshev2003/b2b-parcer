@@ -76,6 +76,7 @@ function migrate(d: Database.Database): void {
   if (!tenderCols.has("doc_text")) d.exec("ALTER TABLE tenders ADD COLUMN doc_text TEXT");
   if (!tenderCols.has("doc_indexed_at")) d.exec("ALTER TABLE tenders ADD COLUMN doc_indexed_at TEXT");
   if (!tenderCols.has("match_notified_at")) d.exec("ALTER TABLE tenders ADD COLUMN match_notified_at TEXT");
+  if (!tenderCols.has("docs_status")) d.exec("ALTER TABLE tenders ADD COLUMN docs_status TEXT");
   const fileCols = new Set((d.prepare("PRAGMA table_info(tender_files)").all() as { name: string }[]).map((c) => c.name));
   if (!fileCols.has("text")) d.exec("ALTER TABLE tender_files ADD COLUMN text TEXT");
 }
@@ -177,6 +178,7 @@ export function saveCard(card: TenderCard): void {
        payment_terms = COALESCE(?, payment_terms),
        delivery_terms = COALESCE(?, delivery_terms),
        requires_auth = ?,
+       docs_status = ?,
        info_rows_json = ?,
        card_fetched_at = ?
      WHERE id = ?`,
@@ -196,6 +198,7 @@ export function saveCard(card: TenderCard): void {
     card.paymentTerms,
     card.deliveryTerms,
     card.requiresAuth ? 1 : 0,
+    card.docsStatus ?? null,
     JSON.stringify(card.infoRows),
     card.fetchedAt,
     card.id,
@@ -235,6 +238,7 @@ export interface TenderRow {
   delivery_terms: string | null;
   status: string | null;
   requires_auth: number;
+  docs_status: string | null;
   info_rows_json: string | null;
   card_fetched_at: string | null;
   doc_text: string | null;
@@ -253,7 +257,8 @@ export interface TenderQuery {
   status?: string;
   hasCard?: boolean;
   sort?: "published" | "end";
-  limit?: number;
+  /** null = no limit (the caller ranks/filters the full set itself). */
+  limit?: number | null;
   offset?: number;
 }
 
@@ -274,14 +279,14 @@ export function queryTenders(opts: TenderQuery = {}): TenderRow[] {
   if (opts.hasCard === false) where.push("card_fetched_at IS NULL");
 
   const orderCol = opts.sort === "end" ? "COALESCE(end_at, actual_until)" : "published_at";
-  const limit = Math.min(Math.max(opts.limit ?? 500, 1), 5000);
-  const offset = Math.max(opts.offset ?? 0, 0);
-
-  const sql =
+  let sql =
     `SELECT * FROM tenders` +
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
-    ` ORDER BY ${orderCol} DESC LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
+    ` ORDER BY ${orderCol} DESC`;
+  if (opts.limit !== null) {
+    sql += " LIMIT ? OFFSET ?";
+    params.push(Math.min(Math.max(opts.limit ?? 500, 1), 5000), Math.max(opts.offset ?? 0, 0));
+  }
   return getDb().prepare(sql).all(...params) as TenderRow[];
 }
 
@@ -344,6 +349,16 @@ export function markMatchNotified(id: string): void {
 }
 
 /** Tenders that have downloaded files but no aggregated doc text yet. */
+/** All tenders with at least one downloaded file (for a full re-index). */
+export function getTendersWithDownloadedFiles(): TenderRow[] {
+  return getDb()
+    .prepare(
+      `SELECT t.* FROM tenders t
+       WHERE EXISTS (SELECT 1 FROM tender_files f WHERE f.tender_id = t.id AND f.local_path IS NOT NULL)`,
+    )
+    .all() as TenderRow[];
+}
+
 export function getTendersNeedingDocIndex(limit = 100): TenderRow[] {
   return getDb()
     .prepare(
@@ -353,6 +368,18 @@ export function getTendersNeedingDocIndex(limit = 100): TenderRow[] {
        ORDER BY t.published_at DESC LIMIT ?`,
     )
     .all(limit) as TenderRow[];
+}
+
+/**
+ * Tenders whose card should be (re)loaded: no card yet, documentation never
+ * checked (cards from before docs_status existed), or loaded as a guest.
+ */
+export function getTendersNeedingCard(): TenderRow[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM tenders WHERE card_fetched_at IS NULL OR docs_status IS NULL OR docs_status = 'guest' ORDER BY published_at DESC",
+    )
+    .all() as TenderRow[];
 }
 
 export function getTendersWithoutCard(limit = 100): TenderRow[] {

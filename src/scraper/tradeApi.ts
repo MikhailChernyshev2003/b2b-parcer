@@ -1,13 +1,14 @@
 import { config } from "../config.js";
 import { fetcher } from "../http/fetcher.js";
-import type { TenderCard } from "../types.js";
+import type { TenderCard, TenderFile } from "../types.js";
 import { clean } from "../util.js";
 
 /**
  * Cards of the new layout (/app/market-next/.../tender-N/) are a client-side
  * app with no data in the HTML; their data comes from this openapi method.
  * It works for guests, but only for market-next trades (classic ones answer
- * AppInvalidArgumentException).
+ * AppInvalidArgumentException). With a Bearer token (see fetcher) it also
+ * returns the documentation files and the additional description.
  */
 const GET_TRADE_PATH = "/market/openapi/v2/trade/get_trade/";
 
@@ -39,6 +40,7 @@ interface GetTradeResponse {
       offers_stage_date_end?: Value<string>;
       currency?: { currency?: { symbol?: string } };
       main_price_type?: { option?: { name?: Hint } };
+      additional_description?: Value<string>;
       [k: string]: unknown;
     };
     settings_values?: {
@@ -49,6 +51,35 @@ interface GetTradeResponse {
       [k: string]: unknown;
     };
   };
+}
+
+interface ApiFile {
+  id?: number;
+  title?: string;
+  uri?: string;
+}
+
+/**
+ * All downloadable files in the trade's field values. Documentation lives in
+ * different fields depending on the trade ("doc" — public, "documentation" —
+ * for registered users, application templates in offers_template_fields), all
+ * as file_group.files[] with a /download.html uri, so collect them wherever
+ * they are. Contact data is skipped.
+ */
+function collectFiles(fieldValues: object): TenderFile[] {
+  const out = new Map<string, TenderFile>();
+  const walk = (node: unknown, key: string) => {
+    if (!node || typeof node !== "object" || key === "contact") return;
+    const files = (node as { file_group?: { files?: ApiFile[] } }).file_group?.files;
+    for (const f of files ?? []) {
+      if (!f.uri) continue;
+      const url = f.uri.startsWith("http") ? f.uri : `${config.baseUrl}${f.uri}`;
+      out.set(url, { name: clean(f.title) || `file-${f.id}`, url, localPath: null });
+    }
+    for (const [k, v] of Object.entries(node)) walk(v, k);
+  };
+  walk(fieldValues, "");
+  return [...out.values()];
 }
 
 /** Fetch a market-next tender card via get_trade and map it to TenderCard. */
@@ -74,6 +105,10 @@ export async function fetchTradeCard(id: string, url: string): Promise<TenderCar
   put("ИНН организатора", t.firm?.inn);
   put("Организатор (полное наименование)", t.firm?.full_name);
   put("Предложений подано", sv.offers_count?.value);
+  put("Дополнительное описание", fv.additional_description?.value);
+
+  const files = collectFiles(fv);
+  const docsForRegistered = Boolean(sv.has_document_by_registered_user?.value);
 
   const participants = sv.participants_count?.value;
 
@@ -95,9 +130,9 @@ export async function fetchTradeCard(id: string, url: string): Promise<TenderCar
     participants: participants != null ? String(participants) : null,
     paymentTerms: clean(fv.payment_terms?.value),
     deliveryTerms: clean(fv.delivery_terms?.value),
-    requiresAuth: Boolean(sv.has_document_by_registered_user?.value),
-    // Documentation files of market-next trades are not exposed to guests.
-    files: [],
+    // Documentation is listed only for an authenticated request.
+    requiresAuth: docsForRegistered && !files.length,
+    files,
     infoRows,
     fetchedAt: new Date().toISOString(),
   };

@@ -3,16 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.16.0 <21 || >=22.3.0"
+  },
   "bin": {
     "b2b": "src/index.ts"
   },
   "scripts": {
+    "start": "tsx src/index.ts serve",
+    "login": "tsx src/index.ts login",
     "scrape": "tsx src/index.ts scrape",
     "card": "tsx src/index.ts card",
+    "index-docs": "tsx src/index.ts index-docs",
     "report": "tsx src/index.ts report",
     "stats": "tsx src/index.ts stats",
+    "watch": "tsx src/index.ts watch",
     "serve": "tsx src/index.ts serve",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts serve",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
   },
@@ -21,10 +28,12 @@
     "better-sqlite3": "^11.8.1",
     "cheerio": "^1.0.0",
     "express": "^4.21.2",
+    "jszip": "3.10.1",
     "mammoth": "^1.12.0",
     "p-limit": "^6.1.0",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
+    "playwright-core": "1.63.0",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"
   },

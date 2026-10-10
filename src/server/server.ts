@@ -17,9 +17,10 @@ import {
 import { evaluate } from "../criteria/matcher.js";
 import { logger } from "../logger.js";
 import { getAuthStatus, refreshAuthStatus } from "../authStatus.js";
+import { loginViaBrowser } from "../auth/browserLogin.js";
 import { enrichCards, fetchCard } from "../scraper/cardScraper.js";
 import { indexPendingDocs } from "../scraper/docs.js";
-import { scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
+import { scrapeFeed, scrapeQueries, sliceByDay } from "../scraper/marketScraper.js";
 import { assembleCookie, getSettings, hasAuth, parseCookieDump, settingsView, updateSettings } from "../settings.js";
 import { getSchedulerState, runCycle, startScheduler, stopScheduler } from "../scheduler.js";
 import { getForm, saveForm, type AppField } from "../application/form.js";
@@ -29,6 +30,9 @@ import { getJob, isRunning, startJob } from "./jobs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "..", "public");
+
+/** Max rows sent to the UI table (after ranking). */
+const LIST_LIMIT = 500;
 
 /** Attach criteria-based score/match info to a tender row for the UI. */
 function withEvaluation(rows: TenderRow[]) {
@@ -59,10 +63,12 @@ export function createServer(): express.Express {
       req.query.hasCard === "true" ? true : req.query.hasCard === "false" ? false : undefined;
     const onlyMatched = req.query.matched === "true";
 
-    let rows = withEvaluation(queryTenders({ q, status, sort, hasCard }));
+    // Score the whole filtered set, then cut: limiting in SQL first (by date)
+    // hid older matches once the full feed made the DB large.
+    let rows = withEvaluation(queryTenders({ q, status, sort, hasCard, limit: null }));
     if (onlyMatched) rows = rows.filter((r) => r._matched);
     rows.sort((a, b) => b._score - a._score);
-    res.json({ count: rows.length, tenders: rows });
+    res.json({ count: rows.length, tenders: rows.slice(0, LIST_LIMIT) });
   });
 
   app.get("/api/tenders/:id", (req, res) => {
@@ -114,6 +120,11 @@ export function createServer(): express.Express {
         : [];
     const dateFrom = typeof body.dateFrom === "string" ? body.dateFrom : undefined;
     const dateTo = typeof body.dateTo === "string" ? body.dateTo : undefined;
+
+    if (body.feed === true) {
+      const job = startJob("scrape", () => scrapeFeed({ status, trade }));
+      return res.json({ started: true, job });
+    }
 
     const finalKeywords = keywords.length ? keywords : loadCriteriaSafe().keywordsAny;
     const base: SearchQuery = { status, trade };
@@ -202,6 +213,16 @@ export function createServer(): express.Express {
     updateSettings(patch);
     if (cookieChanged) void refreshAuthStatus();
     res.json(settingsView());
+  });
+
+  app.post("/api/login/browser", (_req, res) => {
+    if (isRunning()) return res.status(409).json({ error: "Задача уже выполняется" });
+    const job = startJob("login", async () => {
+      const r = await loginViaBrowser();
+      await refreshAuthStatus();
+      return r;
+    });
+    res.json({ started: true, job });
   });
 
   app.post("/api/settings/parse-cookies", (req, res) => {

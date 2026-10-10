@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { PDFParse } from "pdf-parse";
 import { FILES_DIR } from "../config.js";
-import { getTenderFiles, getTendersNeedingDocIndex, saveDocText, saveFileText } from "../db/db.js";
+import { getTenderFiles, getTendersNeedingDocIndex, getTendersWithDownloadedFiles, saveDocText, saveFileText } from "../db/db.js";
 import { logger } from "../logger.js";
+import { extractXlsxText } from "./xlsx.js";
 
 const MAX_DOC_CHARS = 200_000; // cap aggregated text per tender
 
@@ -31,6 +32,9 @@ export async function extractText(
       const mammoth: any = await import("mammoth");
       const res = await (mammoth.default ?? mammoth).extractRawText({ buffer });
       return normalize(res.value);
+    }
+    if ([".xlsx", ".xlsm"].includes(ext) || /spreadsheetml/i.test(contentType)) {
+      return normalize(await extractXlsxText(buffer));
     }
     if ([".txt", ".csv", ".rtf"].includes(ext)) {
       return normalize(buffer.toString("utf-8"));
@@ -63,9 +67,12 @@ export async function indexTenderDocs(tenderId: string): Promise<number> {
   return aggregated.length;
 }
 
-/** Index documentation for all tenders that have files but no aggregated text. */
-export async function indexPendingDocs(limit = 100): Promise<number> {
-  const rows = getTendersNeedingDocIndex(limit);
+/**
+ * Index documentation for tenders that have files but no aggregated text, or
+ * with `all` re-extract every downloaded file (after adding a new format).
+ */
+export async function indexPendingDocs(limit = 100, opts: { all?: boolean } = {}): Promise<number> {
+  const rows = opts.all ? getTendersWithDownloadedFiles() : getTendersNeedingDocIndex(limit);
   logger.info(`Индексация документации: ${rows.length} тендеров`);
   let done = 0;
   for (const r of rows) {

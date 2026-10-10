@@ -34,6 +34,7 @@ export function parseCard(html: string, pageUrl: string): TenderCard {
   const organizerName = valueOf($, "#trade-info-organizer-name") || titleMeta.organizer;
   const publishedAt = parseRuDate(valueOf($, "#trade_info_date_begin"));
   const endAt = parseRuDate(valueOf($, "#trade_info_date_end"));
+  // view_tender.html pages have no #trade_info_date_end; the info rows do.
   const price = valueOf($, "#trade-info-lot-price");
   const currency = valueOf($, "#trade-info-lot-price-currency");
   const quantity = valueOf($, "#trade-info-lot-quantity");
@@ -50,6 +51,10 @@ export function parseCard(html: string, pageUrl: string): TenderCard {
 
   const files = extractFiles($);
   const requiresAuth = detectAuthWall($);
+  // No file links: the "Скачать документацию" button submits action=register,
+  // i.e. registers the firm for the procedure. Not done automatically.
+  const docsRequireRegistration =
+    !files.length && $('form[action*="action=register"] input[type=submit][value*="документац"]').length > 0;
 
   return {
     id,
@@ -61,7 +66,7 @@ export function parseCard(html: string, pageUrl: string): TenderCard {
     region,
     category,
     publishedAt,
-    endAt,
+    endAt: endAt ?? parseRuDate(infoRows["Дата окончания подачи заявок"] || null),
     lastEditedAt,
     price,
     currency,
@@ -69,6 +74,7 @@ export function parseCard(html: string, pageUrl: string): TenderCard {
     paymentTerms,
     deliveryTerms,
     requiresAuth,
+    docsRequireRegistration,
     files,
     infoRows,
     fetchedAt: new Date().toISOString(),
