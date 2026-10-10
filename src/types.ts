@@ -44,6 +44,19 @@ export interface TenderListItem {
   scrapedAt: string;
 }
 
+/**
+ * What we know about a tender's documentation after loading its card:
+ *  - downloaded: files saved (text extracted where the format is supported);
+ *  - listed: files are known but were not downloaded (downloading disabled);
+ *  - failed: files are listed but none could be downloaded;
+ *  - none: the card was loaded with a login and lists no documentation;
+ *  - register_required: classic tender, documentation is handed out only after
+ *    registering for participation ("Скачать документацию" on the site);
+ *  - guest: the card was loaded without a login, documentation was hidden —
+ *    the card is re-loaded once a login is available.
+ */
+export type DocsStatus = "downloaded" | "listed" | "failed" | "none" | "register_required" | "guest";
+
 /** A documentation file reference found on a tender card. */
 export interface TenderFile {
   name: string;
@@ -72,6 +85,10 @@ export interface TenderCard {
   deliveryTerms: string | null;
   /** Whether full details require authentication (guest-limited page). */
   requiresAuth: boolean;
+  /** Classic card offers documentation only via "register for participation". */
+  docsRequireRegistration?: boolean;
+  /** Set by the card scraper once the documentation was checked. */
+  docsStatus?: DocsStatus;
   files: TenderFile[];
   /** Raw extracted info rows label->value for anything not explicitly mapped. */
   infoRows: Record<string, string>;

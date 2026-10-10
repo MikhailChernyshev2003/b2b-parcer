@@ -41,9 +41,6 @@ interface GetTradeResponse {
       currency?: { currency?: { symbol?: string } };
       main_price_type?: { option?: { name?: Hint } };
       additional_description?: Value<string>;
-      documentation?: {
-        documentation_file?: { file_group?: { files?: { id: number; title?: string; uri?: string; size?: number }[] } };
-      }[];
       [k: string]: unknown;
     };
     settings_values?: {
@@ -54,6 +51,35 @@ interface GetTradeResponse {
       [k: string]: unknown;
     };
   };
+}
+
+interface ApiFile {
+  id?: number;
+  title?: string;
+  uri?: string;
+}
+
+/**
+ * All downloadable files in the trade's field values. Documentation lives in
+ * different fields depending on the trade ("doc" — public, "documentation" —
+ * for registered users, application templates in offers_template_fields), all
+ * as file_group.files[] with a /download.html uri, so collect them wherever
+ * they are. Contact data is skipped.
+ */
+function collectFiles(fieldValues: object): TenderFile[] {
+  const out = new Map<string, TenderFile>();
+  const walk = (node: unknown, key: string) => {
+    if (!node || typeof node !== "object" || key === "contact") return;
+    const files = (node as { file_group?: { files?: ApiFile[] } }).file_group?.files;
+    for (const f of files ?? []) {
+      if (!f.uri) continue;
+      const url = f.uri.startsWith("http") ? f.uri : `${config.baseUrl}${f.uri}`;
+      out.set(url, { name: clean(f.title) || `file-${f.id}`, url, localPath: null });
+    }
+    for (const [k, v] of Object.entries(node)) walk(v, k);
+  };
+  walk(fieldValues, "");
+  return [...out.values()];
 }
 
 /** Fetch a market-next tender card via get_trade and map it to TenderCard. */
@@ -81,14 +107,7 @@ export async function fetchTradeCard(id: string, url: string): Promise<TenderCar
   put("Предложений подано", sv.offers_count?.value);
   put("Дополнительное описание", fv.additional_description?.value);
 
-  const files: TenderFile[] = (fv.documentation ?? [])
-    .flatMap((d) => d.documentation_file?.file_group?.files ?? [])
-    .filter((f) => f.uri)
-    .map((f) => ({
-      name: clean(f.title) || `file-${f.id}`,
-      url: f.uri!.startsWith("http") ? f.uri! : `${config.baseUrl}${f.uri}`,
-      localPath: null,
-    }));
+  const files = collectFiles(fv);
   const docsForRegistered = Boolean(sv.has_document_by_registered_user?.value);
 
   const participants = sv.participants_count?.value;

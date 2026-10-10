@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { FILES_DIR } from "../config.js";
 import { getTendersWithoutCard, saveCard, saveDocText, saveFile, saveFileText, type TenderRow } from "../db/db.js";
+import type { DocsStatus } from "../types.js";
 import { fetcher } from "../http/fetcher.js";
 import { logger } from "../logger.js";
 import type { TenderCard } from "../types.js";
@@ -15,7 +16,10 @@ export async function fetchCard(url: string, opts: { downloadFiles?: boolean } =
   const cleanUrl = url.split("#")[0]!;
   logger.info(`Fetch card: ${cleanUrl}`);
   let card: TenderCard;
+  // market-next lists documentation only for a logged-in (Bearer) request.
+  let loggedIn = true;
   if (isMarketNextUrl(cleanUrl)) {
+    loggedIn = Boolean(await fetcher.accessToken());
     card = await fetchTradeCard(extractTenderId(cleanUrl) ?? "", cleanUrl);
   } else {
     card = parseCard(await fetcher.getText(cleanUrl), cleanUrl);
@@ -29,7 +33,15 @@ export async function fetchCard(url: string, opts: { downloadFiles?: boolean } =
       card.requiresAuth ? " | requiresAuth" : ""
     }`,
   );
-  if (opts.downloadFiles && card.files.length) await downloadCardFiles(card);
+  let status: DocsStatus;
+  if (card.files.length) {
+    status = opts.downloadFiles ? ((await downloadCardFiles(card)) ? "downloaded" : "failed") : "listed";
+  } else if (card.docsRequireRegistration) {
+    status = "register_required";
+  } else {
+    status = loggedIn ? "none" : "guest";
+  }
+  card.docsStatus = status;
   saveCard(card);
   return card;
 }
@@ -41,11 +53,9 @@ export async function fetchCard(url: string, opts: { downloadFiles?: boolean } =
  */
 export async function enrichCards(
   limit: number,
-  opts: { downloadFiles?: boolean; only?: (t: TenderRow) => boolean } = {},
+  opts: { downloadFiles?: boolean; rows?: TenderRow[] } = {},
 ): Promise<number> {
-  const rows: TenderRow[] = opts.only
-    ? getTendersWithoutCard(100_000).filter(opts.only).slice(0, limit)
-    : getTendersWithoutCard(limit);
+  const rows: TenderRow[] = opts.rows ? opts.rows.slice(0, limit) : getTendersWithoutCard(limit);
   logger.info(`Enriching ${rows.length} tenders without card data`);
   let ok = 0;
   for (const row of rows) {
@@ -63,10 +73,11 @@ export async function enrichCards(
  * Download accessible files for a card into data/files/<tenderId>/, extract their
  * text, and store the aggregated documentation text for criteria matching.
  */
-export async function downloadCardFiles(card: TenderCard): Promise<void> {
+export async function downloadCardFiles(card: TenderCard): Promise<number> {
   const dir = path.join(FILES_DIR, card.id);
   fs.mkdirSync(dir, { recursive: true });
   const parts: string[] = [];
+  let saved = 0;
   for (const file of card.files) {
     try {
       const { buffer, contentType } = await fetcher.getBuffer(file.url);
@@ -80,6 +91,7 @@ export async function downloadCardFiles(card: TenderCard): Promise<void> {
       fs.writeFileSync(dest, buffer);
       file.localPath = path.relative(FILES_DIR, dest);
       saveFile(card.id, file);
+      saved++;
       logger.info(`    скачан ${file.localPath} (${buffer.length} байт)`);
 
       const text = await extractText(buffer, file.name, contentType);
@@ -93,6 +105,7 @@ export async function downloadCardFiles(card: TenderCard): Promise<void> {
     }
   }
   if (parts.length) saveDocText(card.id, parts.join("\n\n").slice(0, 200_000));
+  return saved;
 }
 
 function sanitizeFilename(name: string): string {

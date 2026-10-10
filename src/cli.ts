@@ -11,7 +11,7 @@ import { describeAuth, refreshAuthStatus } from "./authStatus.js";
 import { loginViaBrowser } from "./auth/browserLogin.js";
 import { startServer } from "./server/server.js";
 import { indexPendingDocs } from "./scraper/docs.js";
-import { runCycle, startScheduler } from "./scheduler.js";
+import { matchedCardQueue, runCycle, startScheduler } from "./scheduler.js";
 
 interface Args {
   _: string[];
@@ -108,7 +108,9 @@ async function cmdCard(args: Args): Promise<void> {
     return;
   }
   const limit = typeof args.flags.limit === "string" ? Number(args.flags.limit) : 20;
-  const ok = await enrichCards(limit, { downloadFiles });
+  const rows = args.flags.matched ? matchedCardQueue(loadCriteria()) : undefined;
+  if (rows) logger.info(`Подходящих тендеров без карточки или документации: ${rows.length}`);
+  const ok = await enrichCards(limit, { downloadFiles, rows });
   logger.info(`Обработано карточек: ${ok}`);
 }
 
@@ -147,8 +149,10 @@ b2b-parcer — парсер тендеров B2B-Center (сторона пост
       словами. С авторизацией доступны страницы (--pages) и фильтр по датам.
 
   npm run card -- --url <url карточки> [--files]
-  npm run card -- [--limit N] [--files]
-      Загрузка детальных карточек. Без --url добирает N тендеров без карточки.
+  npm run card -- [--limit N] [--files] [--matched]
+      Загрузка детальных карточек. Без --url добирает N тендеров без карточки;
+      --matched — только подходящие по критериям (лучшие первыми), включая
+      карточки, загруженные без входа или без проверки документации.
       --files скачивает доступную документацию в data/files/<id>/.
 
   npm run report -- [--criteria path] [--top N]

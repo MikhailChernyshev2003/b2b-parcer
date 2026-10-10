@@ -76,6 +76,7 @@ function migrate(d: Database.Database): void {
   if (!tenderCols.has("doc_text")) d.exec("ALTER TABLE tenders ADD COLUMN doc_text TEXT");
   if (!tenderCols.has("doc_indexed_at")) d.exec("ALTER TABLE tenders ADD COLUMN doc_indexed_at TEXT");
   if (!tenderCols.has("match_notified_at")) d.exec("ALTER TABLE tenders ADD COLUMN match_notified_at TEXT");
+  if (!tenderCols.has("docs_status")) d.exec("ALTER TABLE tenders ADD COLUMN docs_status TEXT");
   const fileCols = new Set((d.prepare("PRAGMA table_info(tender_files)").all() as { name: string }[]).map((c) => c.name));
   if (!fileCols.has("text")) d.exec("ALTER TABLE tender_files ADD COLUMN text TEXT");
 }
@@ -177,6 +178,7 @@ export function saveCard(card: TenderCard): void {
        payment_terms = COALESCE(?, payment_terms),
        delivery_terms = COALESCE(?, delivery_terms),
        requires_auth = ?,
+       docs_status = ?,
        info_rows_json = ?,
        card_fetched_at = ?
      WHERE id = ?`,
@@ -196,6 +198,7 @@ export function saveCard(card: TenderCard): void {
     card.paymentTerms,
     card.deliveryTerms,
     card.requiresAuth ? 1 : 0,
+    card.docsStatus ?? null,
     JSON.stringify(card.infoRows),
     card.fetchedAt,
     card.id,
@@ -235,6 +238,7 @@ export interface TenderRow {
   delivery_terms: string | null;
   status: string | null;
   requires_auth: number;
+  docs_status: string | null;
   info_rows_json: string | null;
   card_fetched_at: string | null;
   doc_text: string | null;
@@ -354,6 +358,18 @@ export function getTendersNeedingDocIndex(limit = 100): TenderRow[] {
        ORDER BY t.published_at DESC LIMIT ?`,
     )
     .all(limit) as TenderRow[];
+}
+
+/**
+ * Tenders whose card should be (re)loaded: no card yet, documentation never
+ * checked (cards from before docs_status existed), or loaded as a guest.
+ */
+export function getTendersNeedingCard(): TenderRow[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM tenders WHERE card_fetched_at IS NULL OR docs_status IS NULL OR docs_status = 'guest' ORDER BY published_at DESC",
+    )
+    .all() as TenderRow[];
 }
 
 export function getTendersWithoutCard(limit = 100): TenderRow[] {

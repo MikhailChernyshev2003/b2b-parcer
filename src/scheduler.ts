@@ -1,6 +1,7 @@
 import { loadCriteriaSafe } from "./criteria/criteria.js";
 import { evaluate } from "./criteria/matcher.js";
-import { getAllTenders, markMatchNotified } from "./db/db.js";
+import { getAllTenders, getTendersNeedingCard, markMatchNotified, type TenderRow } from "./db/db.js";
+import type { Criteria } from "./criteria/criteria.js";
 import { logger } from "./logger.js";
 import { enrichCards } from "./scraper/cardScraper.js";
 import { indexPendingDocs } from "./scraper/docs.js";
@@ -58,6 +59,19 @@ export function getSchedulerState(): SchedulerState {
 }
 
 /**
+ * Criteria matches whose card should be (re)loaded, best scores first. Only
+ * matches get a card (the feed brings ~1000 tenders a day); guest-loaded cards
+ * are retried to get their documentation.
+ */
+export function matchedCardQueue(criteria: Criteria): TenderRow[] {
+  return getTendersNeedingCard()
+    .map((t) => ({ t, e: evaluate(t, criteria) }))
+    .filter((x) => x.e.matched)
+    .sort((a, b) => b.e.score - a.e.score)
+    .map((x) => x.t);
+}
+
+/**
  * One full pass: scrape by criteria keywords -> enrich new cards (+docs) ->
  * index documentation -> evaluate -> announce new matches.
  */
@@ -87,10 +101,9 @@ export async function runCycle(): Promise<CycleResult> {
   // 2. Enrich cards (+ documentation) for tenders missing details.
   let enriched = 0;
   if (settings.autoEnrich) {
-    // Only criteria matches get a card: the feed brings ~1000 tenders a day.
     enriched = await enrichCards(settings.enrichPerCycle, {
       downloadFiles: settings.autoDownloadDocs,
-      only: (t) => evaluate(t, criteria).matched,
+      rows: matchedCardQueue(criteria),
     });
     slog(`Карточек обработано: ${enriched}`);
   }

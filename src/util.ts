@@ -28,9 +28,13 @@ export function splitLabelValue(text: string | null): { label: string | null; va
   return { label: clean(t.slice(0, idx)), value: clean(t.slice(idx + 1)) };
 }
 
-/** Extract the numeric procedure id from a card URL (".../tender-4492697/"). */
+/**
+ * Extract the numeric procedure id from a card URL: ".../tender-4492697/" or
+ * the classic "/market/view.html?id=4492697" / "view_tender.html?id=57624"
+ * forms the search API also returns.
+ */
 export function extractTenderId(url: string): string | null {
-  const m = url.match(/tender-(\d+)/);
+  const m = url.match(/tender-(\d+)/) ?? url.match(/view(?:_tender)?\.html\?(?:[^#]*&)?id=(\d+)/);
   return m ? m[1]! : null;
 }
 
