@@ -3,88 +3,79 @@ import { config } from "../config.js";
 import type { MarketStatus, TenderListItem } from "../types.js";
 import { clean, extractTenderId, parseRuDate } from "../util.js";
 
-/**
- * Parse the /market/ search results table into structured rows.
- *
- * Table markup (server-rendered):
- *   table.search-results > tbody > tr
- *     td[0]: <small>category</small><a class="search-results-title" href="...tender-N/">Тип № N</a>
- *            <div class="search-results-title-desc">description</div>
- *     td[1]: <a href="/firms/...">organizer</a>
- *     td[2]: published date "dd.mm.yyyy hh:mm"
- *     td[3]: actual-until date
- *     td[4]: span.favorite-container[data-id=tsid]
- */
-export function parseSearchList(html: string, status: MarketStatus): TenderListItem[] {
-  const $ = cheerio.load(html);
+/** One trade in the market search API response (fields we use). */
+export interface SearchApiTrade {
+  trade_id: number;
+  sphinx_id?: number;
+  description?: string;
+  url: string;
+  date_actual?: string;
+  date_published?: string;
+  org_name_short?: string;
+  org_name_url?: string;
+  price?: string;
+  region?: string;
+  tags?: string;
+}
+
+/** Market search API response (/site/api/v1/market-search/). */
+export interface SearchApiResponse {
+  /** "guest" for anonymous sessions; anything else means the cookie is accepted. */
+  mode: string;
+  trades: SearchApiTrade[];
+  page_count: number;
+  tabs?: { type: string; name: string; count: number }[];
+}
+
+/** Throw if the payload is not a market search response (site changed again?). */
+export function assertSearchResponse(data: unknown): asserts data is SearchApiResponse {
+  const r = data as Partial<SearchApiResponse> | null;
+  if (!r || typeof r !== "object" || !Array.isArray(r.trades) || typeof r.mode !== "string") {
+    const keys = r && typeof r === "object" ? Object.keys(r).join(", ") : typeof r;
+    throw new Error(
+      `Ответ поиска B2B-Center не распознан (ключи: ${keys}). Вероятно, сайт изменил API — нужна правка парсера.`,
+    );
+  }
+}
+
+/** Map API trades to list items. HTML entities and <mark> highlights are stripped. */
+export function parseSearchResponse(res: SearchApiResponse, status: MarketStatus): TenderListItem[] {
   const scrapedAt = new Date().toISOString();
   const items: TenderListItem[] = [];
 
-  $("table.search-results tbody tr").each((_, tr) => {
-    const $tr = $(tr);
-    const $cells = $tr.children("td");
-    if ($cells.length < 3) return;
+  for (const t of res.trades) {
+    const url = absUrl(t.url.split("#")[0]!);
+    const id = String(t.trade_id ?? extractTenderId(url) ?? "");
+    if (!id) continue;
 
-    const $titleCell = $cells.eq(0);
-    const $link = $titleCell.find("a.search-results-title").first();
-    const href = $link.attr("href") || "";
-    if (!href.includes("tender-")) return;
-
-    const url = absUrl(href);
-    const id = extractTenderId(url);
-    if (!id) return;
-
-    const category = clean($titleCell.find("small").first().text());
-    const description = clean($titleCell.find(".search-results-title-desc").first().text());
-
-    // Link text is "Тип процедуры № 12345" possibly followed by the desc div text.
-    const linkText = clean($link.clone().children("div").remove().end().text()) || "";
-    const { procedureType } = parseTitleLine(linkText);
-
-    const $org = $cells.eq(1).find("a").first();
-    const organizerName = clean($org.text());
-    const organizerUrl = $org.attr("href") ? absUrl($org.attr("href")!) : null;
-
-    const publishedAt = parseRuDate($cells.eq(2).text());
-    const actualUntil = parseRuDate($cells.eq(3).text());
-
-    const tsid =
-      $cells.eq(4).find("[data-id]").attr("data-id") ||
-      new URL(url).searchParams.get("tsid") ||
-      tsidFromHash(href);
-
-    const title = description || linkText || `Процедура № ${id}`;
-
+    const description = text(t.description);
     items.push({
       id,
-      tsid: tsid || null,
-      procedureType,
-      category,
-      title,
+      tsid: t.sphinx_id != null ? String(t.sphinx_id) : null,
+      // Not present in search results; filled in from the card.
+      procedureType: null,
+      category: text(t.tags),
+      title: description || `Процедура № ${id}`,
       description,
       url,
-      organizerName,
-      organizerUrl,
-      publishedAt,
-      actualUntil,
+      organizerName: text(t.org_name_short),
+      organizerUrl: t.org_name_url ? absUrl(t.org_name_url) : null,
+      region: text(t.region),
+      price: text(t.price),
+      publishedAt: parseRuDate(t.date_published),
+      actualUntil: parseRuDate(t.date_actual),
       status,
       scrapedAt,
     });
-  });
+  }
 
   return items;
 }
 
-function parseTitleLine(text: string): { procedureType: string | null; number: string | null } {
-  // e.g. "Запрос предложений № 4492697" / "Объявление о продаже № 4492688"
-  const m = text.match(/^(.*?)\s*№\s*(\d+)/);
-  if (m) return { procedureType: clean(m[1]), number: m[2]! };
-  return { procedureType: clean(text) || null, number: null };
-}
-
-function tsidFromHash(href: string): string | null {
-  const m = href.match(/tsid=(\d+)/);
-  return m ? m[1]! : null;
+/** Decode entities / drop tags from an API string field. */
+function text(s: string | undefined | null): string | null {
+  if (!s) return null;
+  return clean(cheerio.load(s, null, false).text());
 }
 
 function absUrl(href: string): string {

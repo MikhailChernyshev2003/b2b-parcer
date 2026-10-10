@@ -6,14 +6,24 @@ import { fetcher } from "../http/fetcher.js";
 import { logger } from "../logger.js";
 import type { TenderCard } from "../types.js";
 import { parseCard } from "./cardParser.js";
+import { fetchTradeCard, isMarketNextUrl } from "./tradeApi.js";
+import { extractTenderId } from "../util.js";
 import { extractText } from "./docs.js";
 
 /** Fetch and parse a single tender card, persisting the result. */
 export async function fetchCard(url: string, opts: { downloadFiles?: boolean } = {}): Promise<TenderCard> {
   const cleanUrl = url.split("#")[0]!;
   logger.info(`Fetch card: ${cleanUrl}`);
-  const html = await fetcher.getText(cleanUrl);
-  const card = parseCard(html, cleanUrl);
+  let card: TenderCard;
+  if (isMarketNextUrl(cleanUrl)) {
+    card = await fetchTradeCard(extractTenderId(cleanUrl) ?? "", cleanUrl);
+  } else {
+    card = parseCard(await fetcher.getText(cleanUrl), cleanUrl);
+  }
+  if (!card.id || (!card.procedureType && !card.organizerName && !card.endAt)) {
+    // Nothing recognised: saving it would mark the tender as "card loaded" with empty data.
+    throw new Error(`карточка не распознана (${cleanUrl}) — вероятно, изменилась вёрстка или API B2B-Center`);
+  }
   logger.info(
     `  ${card.procedureType ?? "?"} | "${(card.title ?? "").slice(0, 60)}" | files=${card.files.length}${
       card.requiresAuth ? " | requiresAuth" : ""

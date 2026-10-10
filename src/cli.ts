@@ -7,6 +7,7 @@ import { enrichCards, fetchCard } from "./scraper/cardScraper.js";
 import { scrapeQueries, sliceByDay } from "./scraper/marketScraper.js";
 import type { MarketStatus, SearchQuery } from "./types.js";
 import { hasAuth } from "./settings.js";
+import { describeAuth, refreshAuthStatus } from "./authStatus.js";
 import { startServer } from "./server/server.js";
 import { indexPendingDocs } from "./scraper/docs.js";
 import { runCycle, startScheduler } from "./scheduler.js";
@@ -64,9 +65,9 @@ async function cmdScrape(args: Args): Promise<void> {
     }
   }
 
-  const base: SearchQuery = { status, trade: "all" };
-  if (args.flags.buy) base.trade = "buy";
+  const base: SearchQuery = { status, trade: "buy" };
   if (args.flags.sell) base.trade = "sell";
+  if (args.flags["both-trades"]) base.trade = "all";
 
   let queries: SearchQuery[];
   if (keywords.length) {
@@ -79,15 +80,15 @@ async function cmdScrape(args: Args): Promise<void> {
   const from = typeof args.flags["date-from"] === "string" ? (args.flags["date-from"] as string) : undefined;
   const to = typeof args.flags["date-to"] === "string" ? (args.flags["date-to"] as string) : undefined;
   if (from && to) {
-    queries = queries.flatMap((q) => sliceByDay({ ...q, dateMode: "published" }, from, to));
+    queries = queries.flatMap((q) => sliceByDay(q, from, to));
   }
 
-  logger.info(`Запуск парсинга: запросов=${queries.length}, статус=${status}, авторизация=${hasAuth() ? "да" : "нет (гость)"}`);
+  logger.info(`Запуск парсинга: запросов=${queries.length}, статус=${status}, cookie=${hasAuth() ? "задана" : "нет"}`);
   const summary = await scrapeQueries(queries, {
     maxPages: typeof args.flags.pages === "string" ? Number(args.flags.pages) : undefined,
   });
   logger.info(
-    `Готово. Получено строк: ${summary.fetched}, уникальных id: ${summary.uniqueIds}, новых: ${summary.inserted}, обновлено: ${summary.updated}`,
+    `Готово. Получено строк: ${summary.fetched}, уникальных id: ${summary.uniqueIds}, новых: ${summary.inserted}, обновлено: ${summary.updated}, режим сайта: ${summary.mode ?? "?"}`,
   );
 }
 
@@ -111,11 +112,12 @@ function cmdReport(args: Args): void {
   console.log(`Отчёт сохранён: ${paths.json}\n            и: ${paths.csv}\n`);
 }
 
-function cmdStats(): void {
+async function cmdStats(): Promise<void> {
   const { total, withCard } = countTenders();
+  const auth = await refreshAuthStatus();
   console.log(`\nВсего тендеров в базе: ${total}`);
   console.log(`С загруженной карточкой: ${withCard}`);
-  console.log(`БД: ${hasAuth() ? "(сессия авторизована)" : "(гостевая сессия)"}\n`);
+  console.log(`Авторизация: ${describeAuth(auth)}\n`);
 }
 
 function printHelp(): void {
@@ -123,12 +125,13 @@ function printHelp(): void {
 b2b-parcer — парсер тендеров B2B-Center (сторона поставщика)
 
 Использование:
-  npm run scrape -- [--keyword "насосы,трубы"] [--archive|--all] [--buy|--sell]
+  npm run scrape -- [--keyword "насосы,трубы"] [--archive|--all] [--sell|--both-trades]
                     [--date-from dd.mm.yyyy --date-to dd.mm.yyyy] [--pages N]
                     [--criteria path]
-      Сбор списка процедур. Без --keyword берёт ключевые слова из criteria.yaml.
-      Для гостя пагинация недоступна — охват достигается ключевыми словами и
-      нарезкой по датам. С B2B_AUTH_COOKIE доступны страницы (--pages).
+      Сбор списка процедур (по умолчанию — закупки). Без --keyword берёт
+      ключевые слова из criteria.yaml. Гостю сайт отдаёт только первые 20
+      результатов на запрос и игнорирует даты — охват достигается ключевыми
+      словами. С авторизацией доступны страницы (--pages) и фильтр по датам.
 
   npm run card -- --url <url карточки> [--files]
   npm run card -- [--limit N] [--files]
@@ -173,7 +176,7 @@ export async function run(argv: string[]): Promise<void> {
       cmdReport(args);
       break;
     case "stats":
-      cmdStats();
+      await cmdStats();
       break;
     case "serve":
       startServer(typeof args.flags.port === "string" ? Number(args.flags.port) : undefined);

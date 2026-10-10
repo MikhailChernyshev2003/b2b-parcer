@@ -58,10 +58,21 @@ $$(".tab").forEach((tab) => {
 async function loadStats() {
   try {
     const s = await api("/api/stats");
-    $("#stats").textContent = `Тендеров: ${s.total} · с карточкой: ${s.withCard} · ${s.authenticated ? "авторизован" : "гость"}`;
+    $("#stats").textContent = `Тендеров: ${s.total} · с карточкой: ${s.withCard} · ${authLabel(s.auth)}`;
+    $("#stats").title = s.auth && s.auth.error ? s.auth.error : "";
+    // The server checks the cookie in the background after start / save.
+    if (s.auth && s.auth.cookieSet && s.auth.authenticated == null && !s.auth.error) setTimeout(loadStats, 2000);
   } catch (e) {
     $("#stats").textContent = "—";
   }
+}
+
+function authLabel(a) {
+  if (!a || !a.cookieSet) return "гость";
+  if (a.error) return "авторизация: ошибка проверки";
+  if (a.authenticated == null) return "проверка cookie…";
+  if (!a.authenticated) return "cookie недействительна";
+  return a.searchAuthenticated ? "авторизован" : "авторизован (поиск — гость)";
 }
 
 /* ---------- Tenders list ---------- */
@@ -91,10 +102,15 @@ function renderRows() {
     const tr = document.createElement("tr");
     tr.dataset.id = t.id;
     if (t.id === selectedId) tr.classList.add("selected");
+    // Hard filters reset the score to 0, so show why instead of a bare zero.
+    const why = t._matched ? (t._reasons || []).join("; ") : t._rejectedBy || "";
+    const rejected = !t._matched && t._score === 0 && t._rejectedBy;
     tr.innerHTML = `
-      <td><span class="score ${t._matched ? "hit" : ""}">${t._score}</span></td>
+      <td><span class="score ${t._matched ? "hit" : ""}" title="${esc(why)}">${rejected ? "—" : t._score}</span></td>
       <td class="nowrap muted">${esc(t.procedure_type || "—")}</td>
-      <td class="title">${t._matched ? '<span class="badge-match">★ отобран</span> ' : ""}<b>${esc(t.title || "—")}</b></td>
+      <td class="title">${t._matched ? '<span class="badge-match">★ отобран</span> ' : ""}<b>${esc(t.title || "—")}</b>${
+        why ? `<div class="why${t._matched ? " hit" : ""}" title="${esc(why)}">${t._matched ? "" : "✕ "}${esc(why)}</div>` : ""
+      }</td>
       <td>${esc(t.organizer_name || "—")}</td>
       <td>${esc(t.region || "—")}</td>
       <td class="nowrap">${esc(t.price || "—")}</td>
@@ -485,7 +501,7 @@ $("#set-check").addEventListener("click", async () => {
     loadStats();
     const r = await api("/api/settings/check-auth", { method: "POST" });
     $("#set-check-status").textContent = r.authenticated
-      ? `Авторизован (user_id ${r.userId}) ✓`
+      ? `Авторизован (user_id ${r.userId}) ✓${r.note ? " " + r.note : ""}`
       : `Не авторизован${r.note ? " — " + r.note : ""}`;
     $("#set-check-status").style.color = r.authenticated ? "var(--good)" : "#99312a";
   } catch (e) {
