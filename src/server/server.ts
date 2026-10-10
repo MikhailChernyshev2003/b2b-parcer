@@ -273,4 +273,6 @@ export function startServer(port = Number(process.env.PORT) || 5173): void {
     logger.info(`Веб-интерфейс запущен: http://localhost:${port}`);
   });
   if (hasAuth()) void refreshAuthStatus();
+  // On a server nobody clicks "Запустить планировщик" after a restart.
+  if (process.env.B2B_SCHEDULER_AUTOSTART === "1") startScheduler();
 }

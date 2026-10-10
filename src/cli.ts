@@ -6,7 +6,7 @@ import { logger } from "./logger.js";
 import { enrichCards, fetchCard } from "./scraper/cardScraper.js";
 import { scrapeFeed, scrapeQueries, sliceByDay } from "./scraper/marketScraper.js";
 import type { MarketStatus, SearchQuery } from "./types.js";
-import { hasAuth } from "./settings.js";
+import { getSettings, hasAuth } from "./settings.js";
 import { describeAuth, refreshAuthStatus } from "./authStatus.js";
 import { loginViaBrowser } from "./auth/browserLogin.js";
 import { startServer } from "./server/server.js";
@@ -131,6 +131,34 @@ async function cmdStats(): Promise<void> {
   console.log(`Авторизация: ${describeAuth(auth)}\n`);
 }
 
+/**
+ * Send the freshly obtained session cookie to another instance of the parser
+ * (the server, reached through an SSH tunnel) — the server has no screen for
+ * the Chrome login window.
+ */
+async function pushCookie(baseUrl: string): Promise<void> {
+  const url = baseUrl.replace(/\/+$/, "");
+  const cookie = getSettings().authCookie;
+  const put = await fetch(`${url}/api/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ authCookie: cookie }),
+  }).catch((err: Error) => {
+    throw new Error(`не удалось подключиться к ${url} (${err.message}). Туннель открыт?`);
+  });
+  if (!put.ok) throw new Error(`сервер ответил HTTP ${put.status}`);
+  const check = (await (await fetch(`${url}/api/settings/check-auth`, { method: "POST" })).json()) as {
+    authenticated?: boolean;
+    userId?: string;
+    error?: string;
+  };
+  console.log(
+    check.authenticated
+      ? `Cookie отправлена на ${url}: сервер авторизован (user_id ${check.userId}).\n`
+      : `Cookie отправлена на ${url}, но сервер не подтвердил вход: ${check.error ?? "сессия не распознана"}.\n`,
+  );
+}
+
 function printHelp(): void {
   console.log(`
 b2b-parcer — парсер тендеров B2B-Center (сторона поставщика)
@@ -161,9 +189,11 @@ b2b-parcer — парсер тендеров B2B-Center (сторона пост
   npm run stats
       Счётчики базы и проверка авторизации.
 
-  tsx src/index.ts login
+  tsx src/index.ts login [--push http://localhost:5180]
       Открыть окно Chrome со страницей входа B2B-Center; после входа cookie
       сохраняется автоматически (data/settings.json, профиль data/browser-profile).
+      --push — дополнительно отправить cookie другому экземпляру парсера
+      (серверу через SSH-туннель).
 
   npm run serve -- [--port 5173]
       Веб-интерфейс: фильтры, критерии, список тендеров, карточки, запуск сбора.
@@ -203,6 +233,7 @@ export async function run(argv: string[]): Promise<void> {
     case "login": {
       const { userId } = await loginViaBrowser();
       console.log(`\nВход выполнен (user_id ${userId}). Авторизация: ${describeAuth(await refreshAuthStatus())}\n`);
+      if (typeof args.flags.push === "string") await pushCookie(args.flags.push);
       break;
     }
     case "serve":

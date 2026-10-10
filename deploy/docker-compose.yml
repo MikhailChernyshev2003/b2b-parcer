@@ -1,0 +1,31 @@
+# Parser on the server. The port is bound to 127.0.0.1 only: the UI is not
+# reachable from the internet, users open it through an SSH tunnel:
+#   ssh -N -L 5180:127.0.0.1:5180 root@178.17.50.107   ->   http://localhost:5180
+services:
+  b2b-parcer:
+    image: b2b-parcer:latest
+    container_name: b2b-parcer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5180:5173"
+    environment:
+      NODE_ENV: production
+      # Start the scheduler with the container (interval from the settings, 30 min by default).
+      B2B_SCHEDULER_AUTOSTART: "1"
+      # Criteria edited in the UI are kept in the volume; the repo's
+      # config/criteria.yaml is used until the first edit.
+      B2B_CRITERIA_PATH: /app/data/criteria.yaml
+    volumes:
+      - b2b-data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  b2b-data:
