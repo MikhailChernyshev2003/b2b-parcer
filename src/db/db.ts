@@ -349,6 +349,16 @@ export function markMatchNotified(id: string): void {
 }
 
 /** Tenders that have downloaded files but no aggregated doc text yet. */
+/** All tenders with at least one downloaded file (for a full re-index). */
+export function getTendersWithDownloadedFiles(): TenderRow[] {
+  return getDb()
+    .prepare(
+      `SELECT t.* FROM tenders t
+       WHERE EXISTS (SELECT 1 FROM tender_files f WHERE f.tender_id = t.id AND f.local_path IS NOT NULL)`,
+    )
+    .all() as TenderRow[];
+}
+
 export function getTendersNeedingDocIndex(limit = 100): TenderRow[] {
   return getDb()
     .prepare(

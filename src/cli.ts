@@ -168,8 +168,9 @@ b2b-parcer — парсер тендеров B2B-Center (сторона пост
   npm run serve -- [--port 5173]
       Веб-интерфейс: фильтры, критерии, список тендеров, карточки, запуск сбора.
 
-  tsx src/index.ts index-docs [--limit N]
+  tsx src/index.ts index-docs [--limit N] [--all]
       Извлечь текст из скачанной документации и проиндексировать.
+      --all — заново по всем скачанным файлам (например, после поддержки нового формата).
 
   tsx src/index.ts watch [--interval 30] [--once]
       Периодический цикл: сбор -> карточки -> документация -> отбор новых
@@ -208,7 +209,9 @@ export async function run(argv: string[]): Promise<void> {
       startServer(typeof args.flags.port === "string" ? Number(args.flags.port) : undefined);
       break;
     case "index-docs":
-      await indexPendingDocs(typeof args.flags.limit === "string" ? Number(args.flags.limit) : 100);
+      await indexPendingDocs(typeof args.flags.limit === "string" ? Number(args.flags.limit) : 100, {
+        all: Boolean(args.flags.all),
+      });
       break;
     case "watch":
       if (args.flags.once) {
