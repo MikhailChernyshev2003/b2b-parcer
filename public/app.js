@@ -102,10 +102,15 @@ function renderRows() {
     const tr = document.createElement("tr");
     tr.dataset.id = t.id;
     if (t.id === selectedId) tr.classList.add("selected");
+    // Hard filters reset the score to 0, so show why instead of a bare zero.
+    const why = t._matched ? (t._reasons || []).join("; ") : t._rejectedBy || "";
+    const rejected = !t._matched && t._score === 0 && t._rejectedBy;
     tr.innerHTML = `
-      <td><span class="score ${t._matched ? "hit" : ""}">${t._score}</span></td>
+      <td><span class="score ${t._matched ? "hit" : ""}" title="${esc(why)}">${rejected ? "—" : t._score}</span></td>
       <td class="nowrap muted">${esc(t.procedure_type || "—")}</td>
-      <td class="title">${t._matched ? '<span class="badge-match">★ отобран</span> ' : ""}<b>${esc(t.title || "—")}</b></td>
+      <td class="title">${t._matched ? '<span class="badge-match">★ отобран</span> ' : ""}<b>${esc(t.title || "—")}</b>${
+        why ? `<div class="why${t._matched ? " hit" : ""}" title="${esc(why)}">${t._matched ? "" : "✕ "}${esc(why)}</div>` : ""
+      }</td>
       <td>${esc(t.organizer_name || "—")}</td>
       <td>${esc(t.region || "—")}</td>
       <td class="nowrap">${esc(t.price || "—")}</td>
