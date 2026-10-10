@@ -21,6 +21,12 @@ export const config = {
   requestDelayMs: Number(process.env.B2B_REQUEST_DELAY_MS || 1500),
   requestTimeoutMs: Number(process.env.B2B_REQUEST_TIMEOUT_MS || 40000),
   maxRetries: Number(process.env.B2B_MAX_RETRIES || 3),
+  /**
+   * OpenID client of b2b-center's own web app. The new app (search API,
+   * market-next cards) accepts only a Bearer token; we obtain it the same way
+   * the site does in the browser — a silent login with the user's session cookie.
+   */
+  oidcClientId: process.env.B2B_OIDC_CLIENT_ID || "5d438a01-eda7-4a88-9a68-a21f3ce3d4b0",
   /** Max parallel HTTP requests (kept low to stay polite / avoid throttling). */
   concurrency: Number(process.env.B2B_CONCURRENCY || 1),
 } as const;

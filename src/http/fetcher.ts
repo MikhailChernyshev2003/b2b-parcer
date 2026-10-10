@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import axios, { type AxiosInstance, type AxiosResponse } from "axios";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
@@ -9,14 +10,31 @@ import { getSettings } from "../settings.js";
  * - Sends a browser-like User-Agent.
  * - Maintains a simple in-memory cookie jar (captures Set-Cookie, replays Cookie).
  * - Merges the configured authenticated session cookie (runtime settings) on every
- *   request, which unlocks tender documentation and deep pagination.
+ *   request, which unlocks classic tender documentation.
+ * - For the new app's JSON endpoints, adds a Bearer token obtained from that
+ *   cookie via the site's OpenID provider (unlocks search paging and filters).
  * - Retries transient failures (timeouts, 5xx, 429) with backoff.
  * - Throttles to one request per requestDelayMs to avoid server throttling.
  */
+/** JSON endpoints of the new app that authenticate with a Bearer token. */
+const BEARER_PATHS = ["/site/api/", "/api/v1/", "/market/openapi/"];
+
+/** Don't retry a failed token mint for the same cookie more often than this. */
+const TOKEN_RETRY_MS = 5 * 60_000;
+
+interface AccessToken {
+  value: string;
+  expiresAt: number;
+  cookie: string;
+}
+
 class Fetcher {
   private client: AxiosInstance;
   private jar = new Map<string, string>();
   private lastRequestAt = 0;
+  private token: AccessToken | null = null;
+  private tokenPending: Promise<string | null> | null = null;
+  private tokenFailure: { cookie: string; at: number } | null = null;
 
   constructor() {
     this.client = axios.create({
@@ -68,7 +86,7 @@ class Fetcher {
 
   /** GET a JSON endpoint. Throws if the body is not JSON (e.g. an HTML error/captcha page). */
   async getJson<T = unknown>(url: string): Promise<T> {
-    const res = await this.request(url, "text", { headers: { Accept: "application/json" } });
+    const res = await this.request(url, "text", { headers: { Accept: "application/json", ...(await this.bearerFor(url)) } });
     return parseJsonBody<T>(url, res.data as string);
   }
 
@@ -77,9 +95,81 @@ class Fetcher {
     const res = await this.request(url, "text", {
       method: "POST",
       data: JSON.stringify(body),
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      headers: { Accept: "application/json", "Content-Type": "application/json", ...(await this.bearerFor(url)) },
     });
     return parseJsonBody<T>(url, res.data as string);
+  }
+
+  private async bearerFor(url: string): Promise<Record<string, string>> {
+    const path = new URL(url).pathname;
+    if (!BEARER_PATHS.some((p) => path.startsWith(p))) return {};
+    const token = await this.accessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  /**
+   * Bearer token for the new app, minted from the session cookie and cached
+   * until shortly before it expires (the site issues 5-minute tokens and no
+   * refresh token, so a new one is minted when needed). Null = act as guest.
+   */
+  async accessToken(): Promise<string | null> {
+    const cookie = getSettings().authCookie.trim();
+    if (!cookie) return null;
+    const t = this.token;
+    if (t && t.cookie === cookie && Date.now() < t.expiresAt - 30_000) return t.value;
+    const f = this.tokenFailure;
+    if (f && f.cookie === cookie && Date.now() - f.at < TOKEN_RETRY_MS) return null;
+    this.tokenPending ??= this.mintToken(cookie).finally(() => (this.tokenPending = null));
+    return this.tokenPending;
+  }
+
+  /**
+   * Silent OpenID login, as the site's web app does it: authorize with
+   * prompt=none using the session cookie -> one-time code in the redirect ->
+   * exchange it at the token endpoint (public client, no secret).
+   */
+  private async mintToken(cookie: string): Promise<string | null> {
+    const oidc = `${config.baseUrl}/auth/openid`;
+    const redirectUri = `${config.baseUrl}/app/next/silent-auth/`;
+    try {
+      const params = new URLSearchParams({
+        client_id: config.oidcClientId,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        scope: "openid user firm",
+        prompt: "none",
+        state: randomUUID(),
+        nonce: randomUUID(),
+      });
+      await this.throttle();
+      const auth = await this.client.get(`${oidc}/authorize/?${params}`, {
+        maxRedirects: 0,
+        headers: { Cookie: this.cookieHeader() },
+      });
+      this.mergeSetCookie(auth.headers["set-cookie"] as string[] | undefined);
+      const back = new URL(String(auth.headers.location ?? ""), config.baseUrl).searchParams;
+      const code = back.get("code");
+      if (!code) throw new Error(back.get("error") || `нет кода авторизации (HTTP ${auth.status})`);
+
+      await this.throttle();
+      const res = await this.client.post(
+        `${oidc}/token/`,
+        new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: config.oidcClientId }).toString(),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" } },
+      );
+      const body = res.data as { access_token?: string; expires_in?: number; error?: string };
+      if (!body?.access_token) throw new Error(body?.error || `HTTP ${res.status}`);
+
+      this.token = { value: body.access_token, expiresAt: Date.now() + (body.expires_in ?? 300) * 1000, cookie };
+      this.tokenFailure = null;
+      logger.debug("OpenID: получен токен для нового приложения B2B-Center");
+      return body.access_token;
+    } catch (err) {
+      this.token = null;
+      this.tokenFailure = { cookie, at: Date.now() };
+      logger.warn(`OpenID-вход по cookie не удался (${(err as Error).message}) — новый поиск работает как гость.`);
+      return null;
+    }
   }
 
   async getBuffer(url: string): Promise<{ buffer: Buffer; contentType: string }> {
