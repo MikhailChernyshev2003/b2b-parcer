@@ -4,13 +4,14 @@ import { printReport, writeReport } from "./criteria/report.js";
 import { countTenders, getAllTenders } from "./db/db.js";
 import { logger } from "./logger.js";
 import { enrichCards, fetchCard } from "./scraper/cardScraper.js";
-import { scrapeQueries, sliceByDay } from "./scraper/marketScraper.js";
+import { scrapeFeed, scrapeQueries, sliceByDay } from "./scraper/marketScraper.js";
 import type { MarketStatus, SearchQuery } from "./types.js";
 import { hasAuth } from "./settings.js";
 import { describeAuth, refreshAuthStatus } from "./authStatus.js";
+import { loginViaBrowser } from "./auth/browserLogin.js";
 import { startServer } from "./server/server.js";
 import { indexPendingDocs } from "./scraper/docs.js";
-import { runCycle, startScheduler } from "./scheduler.js";
+import { matchedCardQueue, runCycle, startScheduler } from "./scheduler.js";
 
 interface Args {
   _: string[];
@@ -53,6 +54,16 @@ function statusOf(flags: Record<string, string | boolean>): MarketStatus {
 
 async function cmdScrape(args: Args): Promise<void> {
   const status = statusOf(args.flags);
+  const pages = typeof args.flags.pages === "string" ? Number(args.flags.pages) : undefined;
+
+  if (args.flags.feed) {
+    const trade = args.flags.sell ? "sell" : args.flags["both-trades"] ? "all" : "buy";
+    logger.info(`Сбор ленты: статус=${status}, направление=${trade}`);
+    const s = await scrapeFeed({ status, trade, maxPages: pages });
+    logger.info(`Готово. Получено строк: ${s.fetched}, новых: ${s.inserted}, обновлено: ${s.updated}, режим сайта: ${s.mode ?? "?"}`);
+    return;
+  }
+
   let keywords = collectKeywords(args.flags);
 
   // Fall back to criteria keywords if none given on the CLI.
@@ -84,9 +95,7 @@ async function cmdScrape(args: Args): Promise<void> {
   }
 
   logger.info(`Запуск парсинга: запросов=${queries.length}, статус=${status}, cookie=${hasAuth() ? "задана" : "нет"}`);
-  const summary = await scrapeQueries(queries, {
-    maxPages: typeof args.flags.pages === "string" ? Number(args.flags.pages) : undefined,
-  });
+  const summary = await scrapeQueries(queries, { maxPages: pages });
   logger.info(
     `Готово. Получено строк: ${summary.fetched}, уникальных id: ${summary.uniqueIds}, новых: ${summary.inserted}, обновлено: ${summary.updated}, режим сайта: ${summary.mode ?? "?"}`,
   );
@@ -99,7 +108,9 @@ async function cmdCard(args: Args): Promise<void> {
     return;
   }
   const limit = typeof args.flags.limit === "string" ? Number(args.flags.limit) : 20;
-  const ok = await enrichCards(limit, { downloadFiles });
+  const rows = args.flags.matched ? matchedCardQueue(loadCriteria()) : undefined;
+  if (rows) logger.info(`Подходящих тендеров без карточки или документации: ${rows.length}`);
+  const ok = await enrichCards(limit, { downloadFiles, rows });
   logger.info(`Обработано карточек: ${ok}`);
 }
 
@@ -125,6 +136,10 @@ function printHelp(): void {
 b2b-parcer — парсер тендеров B2B-Center (сторона поставщика)
 
 Использование:
+  npm run scrape -- --feed [--pages N] [--archive|--all] [--sell|--both-trades]
+      Вся лента закупок (новые сверху) до уже известных тендеров. Нужна
+      авторизация: гостю сайт отдаёт только 20 записей.
+
   npm run scrape -- [--keyword "насосы,трубы"] [--archive|--all] [--sell|--both-trades]
                     [--date-from dd.mm.yyyy --date-to dd.mm.yyyy] [--pages N]
                     [--criteria path]
@@ -134,21 +149,28 @@ b2b-parcer — парсер тендеров B2B-Center (сторона пост
       словами. С авторизацией доступны страницы (--pages) и фильтр по датам.
 
   npm run card -- --url <url карточки> [--files]
-  npm run card -- [--limit N] [--files]
-      Загрузка детальных карточек. Без --url добирает N тендеров без карточки.
+  npm run card -- [--limit N] [--files] [--matched]
+      Загрузка детальных карточек. Без --url добирает N тендеров без карточки;
+      --matched — только подходящие по критериям (лучшие первыми), включая
+      карточки, загруженные без входа или без проверки документации.
       --files скачивает доступную документацию в data/files/<id>/.
 
   npm run report -- [--criteria path] [--top N]
       Оценка тендеров по критериям, печать топа и выгрузка data/report.{json,csv}.
 
   npm run stats
-      Счётчики базы.
+      Счётчики базы и проверка авторизации.
+
+  tsx src/index.ts login
+      Открыть окно Chrome со страницей входа B2B-Center; после входа cookie
+      сохраняется автоматически (data/settings.json, профиль data/browser-profile).
 
   npm run serve -- [--port 5173]
       Веб-интерфейс: фильтры, критерии, список тендеров, карточки, запуск сбора.
 
-  tsx src/index.ts index-docs [--limit N]
+  tsx src/index.ts index-docs [--limit N] [--all]
       Извлечь текст из скачанной документации и проиндексировать.
+      --all — заново по всем скачанным файлам (например, после поддержки нового формата).
 
   tsx src/index.ts watch [--interval 30] [--once]
       Периодический цикл: сбор -> карточки -> документация -> отбор новых
@@ -178,11 +200,18 @@ export async function run(argv: string[]): Promise<void> {
     case "stats":
       await cmdStats();
       break;
+    case "login": {
+      const { userId } = await loginViaBrowser();
+      console.log(`\nВход выполнен (user_id ${userId}). Авторизация: ${describeAuth(await refreshAuthStatus())}\n`);
+      break;
+    }
     case "serve":
       startServer(typeof args.flags.port === "string" ? Number(args.flags.port) : undefined);
       break;
     case "index-docs":
-      await indexPendingDocs(typeof args.flags.limit === "string" ? Number(args.flags.limit) : 100);
+      await indexPendingDocs(typeof args.flags.limit === "string" ? Number(args.flags.limit) : 100, {
+        all: Boolean(args.flags.all),
+      });
       break;
     case "watch":
       if (args.flags.once) {

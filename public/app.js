@@ -127,6 +127,24 @@ async function selectTender(id) {
   renderDetail(d);
 }
 
+/** Human-readable documentation state of a tender (see DocsStatus on the server). */
+function docsStatusText(t) {
+  const chars = (t.doc_text || "").length;
+  if (!t.card_fetched_at) return "Карточка ещё не загружена — документация будет проверена при её загрузке (подходящие тендеры загружаются планировщиком, лучшие первыми).";
+  switch (t.docs_status) {
+    case "downloaded":
+      return chars
+        ? `Документация скачана и проанализирована: ${chars.toLocaleString("ru-RU")} символов текста.`
+        : "Документация скачана, но текст не извлечён (формат пока не поддерживается: DOC, XLS(X), ZIP, сканы).";
+    case "listed": return "Документация есть, но не скачана (скачивание выключено). Нажмите «Обновить карточку».";
+    case "failed": return "Документация есть, но скачать файлы не удалось.";
+    case "none": return "У тендера нет документации на площадке.";
+    case "register_required": return "Документация выдаётся только после регистрации на участие (кнопка «Скачать документацию» на сайте) — автоматически не скачивается.";
+    case "guest": return "Карточка загружена без входа, документация была скрыта — будет загружена повторно после входа.";
+    default: return "Документация не проверялась — карточка будет загружена повторно.";
+  }
+}
+
 function renderDetail(d) {
   const t = d.tender;
   const ev = d.evaluation;
@@ -148,18 +166,13 @@ function renderDetail(d) {
     .filter(([k]) => !["Тег", "Заказчик"].includes(k))
     .slice(0, 25);
 
-  const docLen = (t.doc_text || "").length;
-  const docHtml = t.doc_indexed_at
-    ? `<p class="muted">Документация проанализирована: ${docLen.toLocaleString("ru-RU")} символов текста.</p>`
-    : `<p class="muted">Документация не проанализирована${t.requires_auth ? " (нужна авторизация)" : ""}.</p>`;
+  const docHtml = `<p class="muted">${esc(docsStatusText(t))}</p>`;
 
   const filesHtml = (d.files || []).length
     ? `<div class="files"><b>Документация:</b>${d.files
         .map((f) => `<a href="${f.local_path ? "/files/" + esc(f.local_path) : esc(f.url)}" target="_blank">${esc(f.name || f.url)}</a>`)
         .join("")}</div>`
-    : t.requires_auth
-      ? `<p class="badge-auth">Документация доступна только авторизованным пользователям площадки.</p>`
-      : "";
+    : "";
 
   $("#detail").innerHTML = `
     <div class="type">${esc(t.procedure_type || "")} № ${esc(t.id)}</div>
@@ -382,6 +395,7 @@ function setButtonsDisabled(v) {
 $("#s-run").addEventListener("click", async () => {
   const body = {
     keywords: $("#s-keywords").value,
+    feed: $("#s-feed").checked,
     status: $("#s-status").value,
     trade: $("#s-trade").value,
     dateFrom: $("#s-dateFrom").value.trim() || undefined,
@@ -506,6 +520,24 @@ $("#set-check").addEventListener("click", async () => {
     $("#set-check-status").style.color = r.authenticated ? "var(--good)" : "#99312a";
   } catch (e) {
     $("#set-check-status").textContent = "Ошибка: " + e.message;
+  }
+});
+
+$("#login-browser").addEventListener("click", async () => {
+  $("#login-status").style.color = "";
+  $("#login-status").textContent = "Открываю окно браузера… Войдите в личный кабинет B2B-Center.";
+  try {
+    await api("/api/login/browser", { method: "POST" });
+    pollJob(async () => {
+      const job = await api("/api/job");
+      const ok = job.status === "done";
+      $("#login-status").textContent = ok ? `Вход выполнен (user_id ${job.result.userId}) ✓` : `Не удалось: ${job.error}`;
+      $("#login-status").style.color = ok ? "var(--good)" : "#99312a";
+      loadSettings();
+      loadStats();
+    });
+  } catch (e) {
+    $("#login-status").textContent = "Ошибка: " + e.message;
   }
 });
 
