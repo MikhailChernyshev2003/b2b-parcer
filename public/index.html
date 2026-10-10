@@ -130,8 +130,8 @@
         <div class="panel">
           <h2>Сбор тендеров</h2>
           <p class="hint">
-            Для гостевой сессии площадка отдаёт ~20 свежих совпадений на запрос и игнорирует страницы,
-            поэтому охват достигается списком ключевых слов и нарезкой по датам.
+            Для гостевой сессии площадка отдаёт 20 совпадений на запрос и игнорирует страницы и даты,
+            поэтому охват достигается списком ключевых слов. С авторизацией доступны страницы и фильтр по датам.
           </p>
           <label>Ключевые слова (через запятую или построчно; пусто = из критериев)
             <textarea id="s-keywords" rows="3"></textarea>
@@ -146,13 +146,13 @@
             </label>
             <label>Направление
               <select id="s-trade">
-                <option value="all" selected>Все</option>
-                <option value="buy">Закупки</option>
+                <option value="buy" selected>Закупки</option>
                 <option value="sell">Продажи</option>
+                <option value="all">Все (два запроса)</option>
               </select>
             </label>
-            <label>Дата с (дд.мм.гггг) <input type="text" id="s-dateFrom" placeholder="01.06.2026" /></label>
-            <label>Дата по (дд.мм.гггг) <input type="text" id="s-dateTo" placeholder="18.06.2026" /></label>
+            <label>Дата с (дд.мм.гггг, нужна авторизация) <input type="text" id="s-dateFrom" placeholder="01.06.2026" /></label>
+            <label>Дата по (дд.мм.гггг, нужна авторизация) <input type="text" id="s-dateTo" placeholder="18.06.2026" /></label>
           </div>
           <div class="actions">
             <button id="s-run" class="btn primary">Запустить сбор</button>

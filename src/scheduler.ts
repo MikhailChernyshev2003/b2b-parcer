@@ -70,10 +70,13 @@ export async function runCycle(): Promise<CycleResult> {
   // 1. Collect the list for each keyword.
   const keywords = criteria.keywordsAny.length ? criteria.keywordsAny : [];
   const queries: SearchQuery[] = keywords.length
-    ? keywords.map((k) => ({ status: "actual", trade: "all", keyword: k }))
-    : [{ status: "actual", trade: "all" }];
+    ? keywords.map((k) => ({ status: "actual", trade: "buy", keyword: k }))
+    : [{ status: "actual", trade: "buy" }];
   const scrapeSummary = await scrapeQueries(queries);
-  slog(`Сбор: новых ${scrapeSummary.inserted}, обновлено ${scrapeSummary.updated}`);
+  slog(`Сбор: новых ${scrapeSummary.inserted}, обновлено ${scrapeSummary.updated}, режим сайта: ${scrapeSummary.mode ?? "?"}`);
+  if (queries.length && scrapeSummary.fetched === 0) {
+    slog(`ВНИМАНИЕ: сбор не вернул ни одной записи — возможно, изменился API B2B-Center`);
+  }
 
   // 2. Enrich cards (+ documentation) for tenders missing details.
   let enriched = 0;

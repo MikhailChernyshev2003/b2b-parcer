@@ -96,6 +96,8 @@ export function upsertListItem(item: TenderListItem): "inserted" | "updated" {
          url = ?,
          organizer_name = COALESCE(?, organizer_name),
          organizer_url = COALESCE(?, organizer_url),
+         region = COALESCE(?, region),
+         price = COALESCE(?, price),
          published_at = COALESCE(?, published_at),
          actual_until = COALESCE(?, actual_until),
          status = ?,
@@ -110,6 +112,8 @@ export function upsertListItem(item: TenderListItem): "inserted" | "updated" {
       item.url,
       item.organizerName,
       item.organizerUrl,
+      item.region,
+      item.price,
       item.publishedAt,
       item.actualUntil,
       item.status,
@@ -121,9 +125,9 @@ export function upsertListItem(item: TenderListItem): "inserted" | "updated" {
   d.prepare(
     `INSERT INTO tenders
        (id, tsid, procedure_type, category, title, description, url,
-        organizer_name, organizer_url, published_at, actual_until, status,
+        organizer_name, organizer_url, region, price, published_at, actual_until, status,
         first_seen_at, last_seen_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   ).run(
     item.id,
     item.tsid,
@@ -134,6 +138,8 @@ export function upsertListItem(item: TenderListItem): "inserted" | "updated" {
     item.url,
     item.organizerName,
     item.organizerUrl,
+    item.region,
+    item.price,
     item.publishedAt,
     item.actualUntil,
     item.status,

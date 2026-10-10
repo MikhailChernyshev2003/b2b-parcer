@@ -1,32 +1,28 @@
-/** Listing status bucket on /market/ (Актуально / В архиве / Все). */
+/** Listing status bucket of the market search (Актуально / В архиве / Все). */
 export type MarketStatus = "actual" | "archive" | "all";
 
-/** Trade direction filter. */
+/** Trade direction: закупки (buy), продажи (sell) or both (two requests). */
 export type TradeType = "all" | "buy" | "sell";
 
-/** "Опубликовано" | "Актуально" | "Изменено" date filter mode. */
-export type DateMode = "published" | "actual" | "changed";
-
-/** Parameters for a single /market/ search request. */
+/**
+ * Parameters for a single market search request.
+ * Filters other than keyword/status/trade are honoured by the site only for
+ * an authenticated session; for guests they are silently ignored.
+ */
 export interface SearchQuery {
   /** Keyword query (supports b2b search syntax: трубы !стальные, "электрод", смаз*). */
   keyword?: string;
   status?: MarketStatus;
   trade?: TradeType;
-  dateMode?: DateMode;
-  /** Inclusive date window (dd.mm.yyyy), used together with dateMode. */
+  /** Inclusive publication date window (dd.mm.yyyy). Auth only. */
   dateFrom?: string;
   dateTo?: string;
-  region?: string;
-  customerId?: string;
   organizerId?: string;
   priceFrom?: number;
   priceTo?: number;
-  onlySmp?: boolean;
-  only223fz?: boolean;
 }
 
-/** A row parsed from the /market/ search results table. */
+/** A row from the market search API. */
 export interface TenderListItem {
   /** Procedure id, e.g. "4492697". */
   id: string;
@@ -40,6 +36,8 @@ export interface TenderListItem {
   url: string;
   organizerName: string | null;
   organizerUrl: string | null;
+  region: string | null;
+  price: string | null;
   publishedAt: string | null;
   actualUntil: string | null;
   status: MarketStatus;

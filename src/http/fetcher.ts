@@ -66,6 +66,22 @@ class Fetcher {
     return (await this.request(url, "text")).data as string;
   }
 
+  /** GET a JSON endpoint. Throws if the body is not JSON (e.g. an HTML error/captcha page). */
+  async getJson<T = unknown>(url: string): Promise<T> {
+    const res = await this.request(url, "text", { headers: { Accept: "application/json" } });
+    return parseJsonBody<T>(url, res.data as string);
+  }
+
+  /** POST a JSON body to a JSON endpoint (b2b-center openapi). */
+  async postJson<T = unknown>(url: string, body: unknown): Promise<T> {
+    const res = await this.request(url, "text", {
+      method: "POST",
+      data: JSON.stringify(body),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+    });
+    return parseJsonBody<T>(url, res.data as string);
+  }
+
   async getBuffer(url: string): Promise<{ buffer: Buffer; contentType: string }> {
     const res = await this.request(url, "arraybuffer");
     return {
@@ -88,15 +104,25 @@ class Fetcher {
     return { authenticated: Boolean(userId) || hasLoggedInMarkers, userId };
   }
 
-  private async request(url: string, responseType: "text" | "arraybuffer"): Promise<AxiosResponse> {
+  private async request(
+    url: string,
+    responseType: "text" | "arraybuffer",
+    opts: { method?: "GET" | "POST"; data?: string; headers?: Record<string, string> } = {},
+  ): Promise<AxiosResponse> {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
       await this.throttle();
       try {
         const cookie = this.cookieHeader();
-        const res = await this.client.get(url, {
+        const res = await this.client.request({
+          url,
+          method: opts.method ?? "GET",
+          data: opts.data,
           responseType,
-          headers: cookie ? { Cookie: cookie } : {},
+          // Keep the raw body: JSON is parsed by the caller so that a non-JSON
+          // answer (captcha/error page) can be reported instead of silently ignored.
+          transformResponse: (d) => d,
+          headers: { ...opts.headers, ...(cookie ? { Cookie: cookie } : {}) },
         });
         this.mergeSetCookie(res.headers["set-cookie"] as string[] | undefined);
         if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
@@ -112,6 +138,15 @@ class Fetcher {
       }
     }
     throw new Error(`GET ${url} failed after ${config.maxRetries} attempts: ${(lastErr as Error)?.message}`);
+  }
+}
+
+function parseJsonBody<T>(url: string, body: string): T {
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    const head = String(body ?? "").replace(/\s+/g, " ").slice(0, 120);
+    throw new Error(`Ожидался JSON от ${url}, получено: ${head}`);
   }
 }
 

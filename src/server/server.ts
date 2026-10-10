@@ -106,7 +106,7 @@ export function createServer(): express.Express {
     if (isRunning()) return res.status(409).json({ error: "Задача уже выполняется" });
     const body = req.body ?? {};
     const status: MarketStatus = (body.status as MarketStatus) || "actual";
-    const trade: TradeType = (body.trade as TradeType) || "all";
+    const trade: TradeType = (body.trade as TradeType) || "buy";
     const keywords: string[] = Array.isArray(body.keywords)
       ? body.keywords.map(String).map((s: string) => s.trim()).filter(Boolean)
       : typeof body.keywords === "string"
@@ -121,7 +121,7 @@ export function createServer(): express.Express {
       ? finalKeywords.map((k) => ({ ...base, keyword: k }))
       : [base];
     if (dateFrom && dateTo) {
-      queries = queries.flatMap((qq) => sliceByDay({ ...qq, dateMode: "published" }, dateFrom, dateTo));
+      queries = queries.flatMap((qq) => sliceByDay(qq, dateFrom, dateTo));
     }
 
     const job = startJob("scrape", () => scrapeQueries(queries));
